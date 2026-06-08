@@ -37,8 +37,7 @@ export default function AppHeader({ userInitials = "JD" }: AppHeaderProps) {
         sx={{
           width: 36,
           height: 36,
-          bgcolor: "transparent",
-          border: "2px solid rgba(255,255,255,0.5)",
+          bgcolor: "#90a4ae",
           color: "#ffffff",
           fontSize: 13,
           fontWeight: 500,

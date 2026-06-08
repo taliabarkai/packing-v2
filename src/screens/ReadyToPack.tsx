@@ -4785,7 +4785,9 @@ export default function ReadyToPack() {
                 "& .MuiChip-label": { px: "12px" },
                 "& .MuiChip-icon": { color: indigo[900], ml: "10px" },
                 "& .MuiChip-deleteIcon": { color: indigo[900], "&:hover": { color: indigo[700] } },
-                "&:hover": { bgcolor: indigo[100] },
+                "&.MuiChip-clickable": { bgcolor: indigo[50] },
+                "&.MuiChip-clickable:hover": { bgcolor: indigo[100] },
+                "&.MuiChip-clickable:active": { bgcolor: indigo[50] },
               }}
             />
             <Popover
@@ -4873,7 +4875,8 @@ export default function ReadyToPack() {
                   <Typography
                     variant="caption"
                     color="text.secondary"
-                    sx={{ display: "block", lineHeight: 1.35 }}
+                    onClick={(e) => { e.stopPropagation(); setPrototypeAccountRole((r) => (r === "packer" ? "supervisor" : "packer")); }}
+                    sx={{ display: "block", lineHeight: 1.35, cursor: "pointer", "&:hover": { color: "text.primary" } }}
                   >
                     {headerProfileRoleLabel}
                   </Typography>
