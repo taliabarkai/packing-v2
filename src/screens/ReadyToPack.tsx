@@ -69,6 +69,7 @@ import DocumentScannerOutlinedIcon from "@mui/icons-material/DocumentScannerOutl
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import HandymanOutlinedIcon from "@mui/icons-material/HandymanOutlined";
+import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import Inventory2OutlinedIcon from "@mui/icons-material/Inventory2Outlined";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
@@ -94,7 +95,6 @@ import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 
 import { LinkedShipmentTabs, type LinkedShipmentTabItem } from "../components/LinkedShipmentTabs";
 import { loadNewSplitShipmentIdFromApi } from "../api/loadNewSplitShipmentId";
-import { loadTrackingNumberFromApi } from "../api/loadTrackingNumber";
 import {
   getPackingStatusChipConfig,
   isPackingStatusBlockingActions,
@@ -3959,11 +3959,10 @@ export default function ReadyToPack() {
   /** Prototype: stack of order ids before opening pending (`fix`) via Next — Back restores the last one. */
   const [orderBrowseStack, setOrderBrowseStack] = useState<string[]>([]);
   const [notFoundQuery, setNotFoundQuery] = useState<string | null>(null);
-  const [itemsReviewed, setItemsReviewed] = useState(false);
   const [shipmentDetailsEditUnlocked, setShipmentDetailsEditUnlocked] = useState(false);
   const [trackingManualMode, setTrackingManualMode] = useState(false);
   const [manualTrackingInput, setManualTrackingInput] = useState("");
-  const [trackingLoadPending, setTrackingLoadPending] = useState(false);
+  const [trackingManualSaved, setTrackingManualSaved] = useState(false);
   /** True after a successful Tracking ID “Load” from API for the current manual session; reset when leaving manual or loading an order. */
   const manualTrackingLoadedFromApiRef = useRef(false);
   const [activeCarrierRouteId, setActiveCarrierRouteId] = useState(INITIAL_CARRIER_ROUTE_ID);
@@ -3997,6 +3996,7 @@ export default function ReadyToPack() {
   /** Synchronous intent for `fallback-supervisor` loads — the `loadedOrderId` effect must not rely on batched `orderInput` (stale closure). */
   const prototypeFallbackSupervisorLoadRef = useRef(false);
   const [packSuccessAnimNonce, setPackSuccessAnimNonce] = useState(0);
+  const [packButtonLayout, setPackButtonLayout] = useState<"v1" | "v2" | "v3">("v1");
   const [sentToFixReason, setSentToFixReason] = useState<string | null>(null);
   /** After OK/Cancel, hide the pending notice until `loadedOrderId` changes again. */
   const [pendingShipmentDialogDismissed, setPendingShipmentDialogDismissed] = useState(false);
@@ -4272,7 +4272,6 @@ export default function ReadyToPack() {
     }
     setPackSuccessAnimNonce(0);
     setFallbackPackSubmitPhase("idle");
-    setItemsReviewed(false);
     const isFixQueue = isPrototypePendingOrderId(loadedOrderId);
     const isCancelledProto = isPrototypeCancelledOrderId(loadedOrderId);
     const isOnHoldProto = isPrototypeOnHoldOrderId(loadedOrderId);
@@ -4292,11 +4291,9 @@ export default function ReadyToPack() {
     } else if (isPackedProto) {
       setPackingOrderUiStatus("packed");
       setSentToFixReason(null);
-      setItemsReviewed(true);
     } else if (isShippedProto) {
       setPackingOrderUiStatus("shipped");
       setSentToFixReason(null);
-      setItemsReviewed(true);
     } else {
       setPackingOrderUiStatus("readyToPack");
       setSentToFixReason(null);
@@ -4308,13 +4305,12 @@ export default function ReadyToPack() {
     ) {
       setPackingOrderUiStatus("packApiFailed");
       setFallbackPackSubmitPhase("failed");
-      setItemsReviewed(true);
     }
     setShipmentDetailsEditUnlocked(false);
     setTrackingManualMode(false);
     setManualTrackingInput("");
+    setTrackingManualSaved(false);
     manualTrackingLoadedFromApiRef.current = false;
-    setTrackingLoadPending(false);
     setActiveCarrierRouteId(INITIAL_CARRIER_ROUTE_ID);
     setCarrierRouteDialogOpen(false);
     setSavedShipmentAddress({ ...DEFAULT_ADDRESS_FORM });
@@ -4484,20 +4480,6 @@ export default function ReadyToPack() {
     ]);
   };
 
-  const handleLoadTrackingNumber = async () => {
-    if (!loadedOrderId) return;
-    setTrackingLoadPending(true);
-    try {
-      const id = await loadTrackingNumberFromApi(loadedOrderId);
-      setManualTrackingInput(id);
-      manualTrackingLoadedFromApiRef.current = String(id).trim() !== "";
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setTrackingLoadPending(false);
-    }
-  };
-
   const handleLoadOrderFromInput = (raw: string) => {
     const trimmed = raw.trim();
     setOrderInput(trimmed);
@@ -4602,13 +4584,14 @@ export default function ReadyToPack() {
       }}
     >
       <AppBar
-        position="relative"
+        position="sticky"
         color="inherit"
         elevation={0}
         sx={{
           ...elevationSx,
           bgcolor: "background.paper",
           minHeight: 72,
+          top: 56,
           zIndex: 2,
           justifyContent: "center",
         }}
@@ -5067,80 +5050,114 @@ export default function ReadyToPack() {
                       spacing={shipmentDetailsEditUnlocked ? 0.5 : 0}
                       sx={{ alignItems: "flex-start", minWidth: 0, width: "100%", maxWidth: 145 }}
                     >
-                      <Stack
-                        direction="row"
-                        alignItems="center"
-                        spacing={0.5}
-                        sx={{
-                          borderBottom: "1px solid",
-                          borderColor: "divider",
-                          pb: 0.25,
-                          minHeight: 36,
-                          width: "100%",
-                          minWidth: 0,
-                        }}
-                      >
-                        <Tooltip title="Load">
-                          <Box component="span" sx={{ display: "inline-flex", flexShrink: 0 }}>
+                      {trackingManualSaved ? (
+                        /* Saved state: value + pencil edit on right */
+                        <Stack
+                          direction="row"
+                          alignItems="center"
+                          spacing={0.5}
+                          sx={{ minHeight: 36, width: "100%", minWidth: 0 }}
+                        >
+                          <Box
+                            sx={{
+                              typography: "body1",
+                              letterSpacing: "0.15px",
+                              minWidth: 0,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              flex: "1 1 0",
+                            }}
+                          >
+                            {manualTrackingInput}
+                          </Box>
+                          <Tooltip title="Edit">
                             <IconButton
                               size="small"
-                              aria-label="Load tracking number from API"
-                              disabled={trackingLoadPending || !loadedOrderId}
-                              onClick={() => {
-                                void handleLoadTrackingNumber();
-                              }}
-                              sx={{ color: "primary.dark" }}
+                              aria-label="Edit tracking ID"
+                              onClick={() => setTrackingManualSaved(false)}
+                              sx={{ color: "action.active", flexShrink: 0 }}
                             >
-                              <SyncIcon fontSize="small" />
+                              <EditOutlinedIcon fontSize="small" />
                             </IconButton>
-                          </Box>
-                        </Tooltip>
-                        <InputBase
-                          placeholder="Enter/Load ID"
-                          value={manualTrackingInput}
-                          onChange={(e) => setManualTrackingInput(e.target.value)}
-                          inputProps={{ "aria-label": "Manual tracking ID" }}
+                          </Tooltip>
+                        </Stack>
+                      ) : (
+                        /* Editing state: input + checkmark when non-empty */
+                        <Stack
+                          direction="row"
+                          alignItems="center"
+                          spacing={0.5}
                           sx={{
-                            typography: "body1",
-                            letterSpacing: "0.15px",
-                            flex: "1 1 0",
-                            minWidth: 0,
+                            borderBottom: "1px solid",
+                            borderColor: "divider",
+                            pb: 0.25,
+                            minHeight: 36,
                             width: "100%",
-                            "& input": {
-                              width: "100%",
-                              minWidth: 0,
-                              textOverflow: "ellipsis",
-                            },
-                            "& input::placeholder": { opacity: 1, color: "action.disabled" },
-                          }}
-                        />
-                      </Stack>
-                      <ShipmentFieldActionArea visible={shipmentDetailsEditUnlocked}>
-                        <Link
-                          component="button"
-                          type="button"
-                          underline="hover"
-                          onClick={() => {
-                            manualTrackingLoadedFromApiRef.current = false;
-                            setTrackingManualMode(false);
-                            setManualTrackingInput("");
-                          }}
-                          sx={{
-                            typography: "body1",
-                            fontWeight: 400,
-                            letterSpacing: "0.15px",
-                            cursor: "pointer",
-                            alignSelf: "flex-start",
-                            border: "none",
-                            background: "none",
-                            padding: 0,
-                            font: "inherit",
-                            color: "primary.dark",
-                            textAlign: "left",
+                            minWidth: 0,
                           }}
                         >
-                          Remove Manual ID
-                        </Link>
+                          <InputBase
+                            placeholder="Enter Number"
+                            value={manualTrackingInput}
+                            onChange={(e) => setManualTrackingInput(e.target.value)}
+                            inputProps={{ "aria-label": "Manual tracking ID" }}
+                            sx={{
+                              typography: "body1",
+                              letterSpacing: "0.15px",
+                              flex: "1 1 0",
+                              minWidth: 0,
+                              width: "100%",
+                              "& input": { width: "100%", minWidth: 0, textOverflow: "ellipsis" },
+                              "& input::placeholder": { opacity: 1, color: "action.disabled" },
+                            }}
+                          />
+                          {manualTrackingInput.trim() !== "" && (
+                            <Tooltip title="Save">
+                              <IconButton
+                                size="small"
+                                aria-label="Save tracking ID"
+                                onClick={() => {
+                                  manualTrackingLoadedFromApiRef.current = true;
+                                  setTrackingManualSaved(true);
+                                }}
+                                sx={{ color: "action.active", flexShrink: 0 }}
+                              >
+                                <CheckIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      )}
+                      <ShipmentFieldActionArea visible={shipmentDetailsEditUnlocked}>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Link
+                            component="button"
+                            type="button"
+                            underline="hover"
+                            onClick={() => {
+                              manualTrackingLoadedFromApiRef.current = false;
+                              setTrackingManualMode(false);
+                              setTrackingManualSaved(false);
+                              setManualTrackingInput("");
+                            }}
+                            sx={{
+                              typography: "body1",
+                              fontWeight: 400,
+                              letterSpacing: "0.15px",
+                              cursor: "pointer",
+                              alignSelf: "flex-start",
+                              border: "none",
+                              background: "none",
+                              padding: 0,
+                              font: "inherit",
+                              color: "primary.dark",
+                              textAlign: "left",
+                            }}
+                          >
+                            Remove Manual ID
+                          </Link>
+                        </Stack>
                       </ShipmentFieldActionArea>
                     </Stack>
                   ) : (
@@ -5682,48 +5699,576 @@ export default function ReadyToPack() {
               return null;
             })}
 
-            {!isSortingStationView &&
-            packingOrderUiStatus !== "cancelled" &&
-            packingOrderUiStatus !== "onHold" &&
-            packingOrderUiStatus !== "shipped" &&
-            !isLinkedOrderNonPrimaryTab ? (
+            {!hidePackActionsUi && (
               <>
-                <Divider sx={{ my: 3 }} />
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  justifyContent="flex-start"
-                  sx={{ width: "100%", textAlign: "left", p: "8px", boxSizing: "border-box" }}
+                <Divider sx={{ mx: -3, mt: 3 }} />
+                <Box
+                  sx={{
+                    position: "relative",
+                    pt: packButtonLayout === "v3" ? 1 : 3,
+                    pb: packButtonLayout === "v3" ? 1 : 3,
+                    /* V1: equal 48px both sides. V2: 48px left, 0 right (Paper's p:3 provides the gap). V3: minimal */
+                    pl: packButtonLayout === "v3" ? 1 : 6,
+                    pr: packButtonLayout === "v1" ? 6 : packButtonLayout === "v2" ? 0 : 1,
+                  }}
                 >
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={itemsReviewed}
-                        onChange={(_, checked) => setItemsReviewed(checked)}
-                        disabled={packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed"}
+
+                  {packButtonLayout === "v2" ? (
+                    /* V2: horizontal row, right-aligned. Secondary buttons + divider + Pack */
+                    <Stack direction="row" alignItems="center" justifyContent="flex-end">
+                      {/* Secondary buttons */}
+                      <Stack direction="row" alignItems="center" spacing={1.5}>
+                        {!orderPacked && !hungaryFactoryDemoActive ? (
+                          <Button
+                            variant="outlined"
+                            color="primary"
+                            startIcon={<HandymanOutlinedIcon />}
+                            onClick={() => setSendToFixDialogOpen(true)}
+                            sx={{
+                              height: 52,
+                              px: 6,
+                              fontSize: 17,
+                              fontWeight: 500,
+                              borderColor: "primary.main",
+                              color: "primary.main",
+                              whiteSpace: "nowrap",
+                              borderRadius: 100,
+                            }}
+                          >
+                            Send to Fix
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="outlined"
+                          color="primary"
+                          id="more-actions-button"
+                          aria-controls={moreActionsMenuAnchor ? "more-actions-menu" : undefined}
+                          aria-expanded={moreActionsMenuAnchor ? "true" : "false"}
+                          aria-haspopup="true"
+                          endIcon={<ExpandMoreIcon />}
+                          onClick={(e) => setMoreActionsMenuAnchor(e.currentTarget)}
+                          sx={{
+                            height: 52,
+                            px: 6,
+                            fontSize: 17,
+                            fontWeight: 500,
+                            borderColor: "primary.main",
+                            color: "primary.main",
+                            whiteSpace: "nowrap",
+                            borderRadius: 100,
+                          }}
+                        >
+                          More Actions
+                        </Button>
+                      </Stack>
+                      {/* Divider with 24px gap on each side */}
+                      <Divider orientation="vertical" flexItem sx={{ mx: 3, my: 0.5 }} />
+                      {/* Pack button */}
+                      <Button
+                        key={packSuccessAnimNonce}
+                        variant="contained"
                         color="primary"
-                        size="medium"
-                        sx={{ py: 0.5, pl: 0, pr: 0.5 }}
-                      />
-                    }
-                    label={
-                      <Typography variant="h6" sx={{ color: "primary.dark", fontSize: 20, fontWeight: 500 }}>
-                        I reviewed and packed {packItemCountUi} items
-                      </Typography>
-                    }
-                    sx={{
-                      m: 0,
-                      mr: "auto",
-                      alignItems: "center",
-                      userSelect: "none",
-                      gap: "8px",
-                      "& .MuiFormControlLabel-label": { marginLeft: 0 },
-                    }}
-                  />
-                </Stack>
+                        disabled={
+                          (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
+                          (trackingManualMode && manualTrackingInput.trim() === "") ||
+                          fallbackPackSubmitPhase === "loading"
+                        }
+                        onClick={() => {
+                          if (fallbackPackSubmitPhase === "loading") return;
+                          if (
+                            (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
+                            (trackingManualMode && manualTrackingInput.trim() === "")
+                          ) return;
+                          if (isFallbackPrototype) { startFallbackPackApiSimulation(); return; }
+                          if (packingOrderUiStatus === "readyToPack" && (!trackingManualMode || manualTrackingInput.trim() !== "")) {
+                            setPackingOrderUiStatus("packed");
+                            setPackSuccessAnimNonce((n) => n + 1);
+                          }
+                        }}
+                        startIcon={
+                          fallbackPackSubmitPhase === "loading" ? (
+                            <CircularProgress size={20} color="inherit" sx={{ color: "#fff !important" }} />
+                          ) : (
+                            <ShoppingBagOutlinedIcon />
+                          )
+                        }
+                        sx={{
+                          height: 52,
+                          px: 6,
+                          fontSize: 17,
+                          fontWeight: 500,
+                          whiteSpace: "nowrap",
+                          borderRadius: 100,
+                          transformOrigin: "center center",
+                          ...(packSuccessAnimNonce > 0 && {
+                            animation: `${packSuccessPop} 0.62s cubic-bezier(0.34, 1.45, 0.64, 1)`,
+                          }),
+                          ...(trackingManualMode &&
+                            packingOrderUiStatus === "readyToPack" &&
+                            manualTrackingInput.trim() !== "" && {
+                              "&:not(.Mui-disabled)": {
+                                bgcolor: "#ed6c02",
+                                color: "#fff",
+                                "&:hover": { bgcolor: "#e65100" },
+                              },
+                            }),
+                        }}
+                      >
+                        {fallbackPackSubmitPhase === "loading"
+                          ? "Packing…"
+                          : trackingManualMode
+                            ? `Manual Pack ${packItemCountUi} Items`
+                            : `Pack ${packItemCountUi} Items`}
+                      </Button>
+                      <Menu
+                        id="more-actions-menu"
+                        anchorEl={moreActionsMenuAnchor}
+                        open={Boolean(moreActionsMenuAnchor)}
+                        onClose={() => setMoreActionsMenuAnchor(null)}
+                        anchorOrigin={{ vertical: "top", horizontal: "right" }}
+                        transformOrigin={{ vertical: "bottom", horizontal: "right" }}
+                        slotProps={{
+                          paper: {
+                            elevation: 8,
+                            sx: { minWidth: 276, mb: 0.5, borderRadius: 1, py: 1, boxSizing: "border-box" },
+                          },
+                        }}
+                      >
+                        {moreActionsMenuItems.map(({ id, label, Icon }) => (
+                          <MenuItem
+                            key={id}
+                            onClick={() => {
+                              setMoreActionsMenuAnchor(null);
+                              if (id === "unpack-shipment") setPackingOrderUiStatus("readyToPack");
+                              if (id === "join-shipment") setJoinShipmentDialogOpen(true);
+                              if (id === "split-shipment") setSplitShipmentDialogOpen(true);
+                            }}
+                            sx={{ py: 0.75, px: 2, typography: "body1" }}
+                          >
+                            <ListItemIcon sx={{ minWidth: 36 }}>
+                              <Icon sx={{ fontSize: 20, color: "action.active" }} />
+                            </ListItemIcon>
+                            {label}
+                          </MenuItem>
+                        ))}
+                      </Menu>
+                    </Stack>
+                  ) : packButtonLayout === "v1" ? (
+                    /* V1: stacked layout, equal 48px padding both sides */
+                    <Stack spacing={1.5}>
+                      <Button
+                        key={packSuccessAnimNonce}
+                        fullWidth
+                        variant="contained"
+                        color="primary"
+                        disabled={
+                          (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
+                          (trackingManualMode && manualTrackingInput.trim() === "") ||
+                          fallbackPackSubmitPhase === "loading"
+                        }
+                        onClick={() => {
+                          if (fallbackPackSubmitPhase === "loading") return;
+                          if (
+                            (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
+                            (trackingManualMode && manualTrackingInput.trim() === "")
+                          ) {
+                            return;
+                          }
+                          if (isFallbackPrototype) {
+                            startFallbackPackApiSimulation();
+                            return;
+                          }
+                          if (
+                            packingOrderUiStatus === "readyToPack" &&
+                            (!trackingManualMode || manualTrackingInput.trim() !== "")
+                          ) {
+                            setPackingOrderUiStatus("packed");
+                            setPackSuccessAnimNonce((n) => n + 1);
+                          }
+                        }}
+                        startIcon={
+                          fallbackPackSubmitPhase === "loading" ? (
+                            <CircularProgress size={22} color="inherit" sx={{ color: "#fff !important" }} />
+                          ) : isFallbackPrototype && fallbackPackSubmitPhase === "failed" ? (
+                            <SyncIcon sx={{ color: "#fff !important" }} />
+                          ) : (
+                            <ShoppingBagOutlinedIcon
+                              sx={
+                                trackingManualMode &&
+                                packingOrderUiStatus === "readyToPack" &&
+                                manualTrackingInput.trim() !== ""
+                                  ? { color: "#fff !important" }
+                                  : undefined
+                              }
+                            />
+                          )
+                        }
+                        sx={{
+                          minHeight: 56,
+                          height: 56,
+                          py: 0,
+                          boxSizing: "border-box",
+                          fontSize: 18,
+                          fontWeight: 500,
+                          borderRadius: 100,
+                          transformOrigin: "center center",
+                          ...(packSuccessAnimNonce > 0 && {
+                            animation: `${packSuccessPop} 0.62s cubic-bezier(0.34, 1.45, 0.64, 1)`,
+                          }),
+                          ...(trackingManualMode &&
+                            packingOrderUiStatus === "readyToPack" &&
+                            manualTrackingInput.trim() !== "" && {
+                              "&:not(.Mui-disabled)": {
+                                bgcolor: "#ed6c02",
+                                color: "#fff",
+                                "&:hover": { bgcolor: "#e65100" },
+                              },
+                            }),
+                        }}
+                      >
+                        {fallbackPackSubmitPhase === "loading"
+                          ? "Packing…"
+                          : isFallbackPrototype && fallbackPackSubmitPhase === "failed"
+                            ? `Retry Pack ${packItemCountUi} Items`
+                            : trackingManualMode
+                              ? `Manual Pack ${packItemCountUi} Items`
+                              : `Pack ${packItemCountUi} Items`}
+                      </Button>
+                      {(!hungaryFactoryDemoActive || orderPacked) ? (
+                        <Stack spacing={0}>
+                          {showFallbackPackButton ? (
+                            <Button
+                              fullWidth
+                              variant="outlined"
+                              color="primary"
+                              onClick={() => setFallbackPackDialogOpen(true)}
+                              sx={{
+                                minHeight: 56,
+                                height: 56,
+                                py: 0,
+                                boxSizing: "border-box",
+                                fontSize: 18,
+                                fontWeight: 500,
+                                textTransform: "none",
+                                borderColor: "primary.main",
+                                color: "primary.main",
+                                borderRadius: 100,
+                              }}
+                            >
+                              Fallback Pack
+                            </Button>
+                          ) : null}
+                          <Stack
+                            direction="row"
+                            spacing={1}
+                            sx={
+                              showFallbackPackButton
+                                ? { mt: 3, borderTop: "1px solid", borderColor: "divider", pt: 3 }
+                                : undefined
+                            }
+                          >
+                            {!orderPacked && !hungaryFactoryDemoActive ? (
+                              <Button
+                                fullWidth
+                                variant="outlined"
+                                color="primary"
+                                startIcon={<HandymanOutlinedIcon />}
+                                onClick={() => setSendToFixDialogOpen(true)}
+                                sx={{
+                                  minHeight: 56,
+                                  height: 56,
+                                  py: 0,
+                                  boxSizing: "border-box",
+                                  fontSize: 18,
+                                  fontWeight: 500,
+                                  borderColor: "primary.main",
+                                  color: "primary.main",
+                                  borderRadius: 100,
+                                }}
+                              >
+                                Send to Fix
+                              </Button>
+                            ) : null}
+                            <Button
+                              fullWidth
+                              variant="outlined"
+                              color="primary"
+                              id="more-actions-button"
+                              aria-controls={moreActionsMenuAnchor ? "more-actions-menu" : undefined}
+                              aria-expanded={moreActionsMenuAnchor ? "true" : "false"}
+                              aria-haspopup="true"
+                              endIcon={<ExpandMoreIcon />}
+                              onClick={(e) => setMoreActionsMenuAnchor(e.currentTarget)}
+                              sx={{
+                                minHeight: 56,
+                                height: 56,
+                                py: 0,
+                                boxSizing: "border-box",
+                                fontSize: 18,
+                                fontWeight: 500,
+                                borderColor: "primary.main",
+                                color: "primary.main",
+                                borderRadius: 100,
+                              }}
+                            >
+                              More Actions
+                            </Button>
+                            <Menu
+                              id="more-actions-menu"
+                              anchorEl={moreActionsMenuAnchor}
+                              open={Boolean(moreActionsMenuAnchor)}
+                              onClose={() => setMoreActionsMenuAnchor(null)}
+                              anchorOrigin={
+                                orderPacked
+                                  ? { vertical: "top", horizontal: "right" }
+                                  : { vertical: "bottom", horizontal: "right" }
+                              }
+                              transformOrigin={
+                                orderPacked
+                                  ? { vertical: "bottom", horizontal: "right" }
+                                  : { vertical: "top", horizontal: "right" }
+                              }
+                              slotProps={{
+                                paper: {
+                                  elevation: 8,
+                                  sx: {
+                                    minWidth: 276,
+                                    ...(orderPacked ? { mb: 0.5 } : { mt: 0.5 }),
+                                    borderRadius: 1,
+                                    py: 1,
+                                    boxSizing: "border-box",
+                                  },
+                                },
+                              }}
+                            >
+                              {moreActionsMenuItems.map(({ id, label, Icon }) => (
+                                <MenuItem
+                                  key={id}
+                                  onClick={() => {
+                                    setMoreActionsMenuAnchor(null);
+                                    if (id === "unpack-shipment") setPackingOrderUiStatus("readyToPack");
+                                    if (id === "join-shipment") setJoinShipmentDialogOpen(true);
+                                    if (id === "split-shipment") setSplitShipmentDialogOpen(true);
+                                  }}
+                                  sx={{ py: 0.75, px: 2, typography: "body1" }}
+                                >
+                                  <ListItemIcon sx={{ minWidth: 36 }}>
+                                    <Icon sx={{ fontSize: 20, color: "action.active" }} />
+                                  </ListItemIcon>
+                                  {label}
+                                </MenuItem>
+                              ))}
+                            </Menu>
+                          </Stack>
+                        </Stack>
+                      ) : null}
+                    </Stack>
+                  ) : null /* V3: buttons rendered in the fixed bottom bar below */}
+                </Box>
               </>
-            ) : null}
+            )}
           </Paper>
+
+          {/* Prototype layout toggle — fixed above sticky bar in V3, bottom-left otherwise */}
+          {!hidePackActionsUi && (
+            <Box
+              onClick={() =>
+                setPackButtonLayout((v) => (v === "v1" ? "v2" : v === "v2" ? "v3" : "v1"))
+              }
+              sx={{
+                position: "fixed",
+                bottom: packButtonLayout === "v3" ? 120 : 16,
+                left: 78,
+                zIndex: 1201,
+                width: 44,
+                height: 44,
+                borderRadius: "50%",
+                bgcolor: "#e91e8c",
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 16,
+                fontWeight: 700,
+                cursor: "pointer",
+                userSelect: "none",
+                fontFamily: "inherit",
+                letterSpacing: "0.5px",
+                "&:hover": { bgcolor: "#e91e8c", opacity: 0.9 },
+              }}
+            >
+              {packButtonLayout.toUpperCase()}
+            </Box>
+          )}
+
+          {/* V3: floating action bar — transparent centering shell + inner card */}
+          {!hidePackActionsUi && packButtonLayout === "v3" && (
+            <Box
+              sx={{
+                position: "fixed",
+                bottom: 32,
+                left: 70,
+                right: 0,
+                zIndex: 1200,
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                pointerEvents: "none",
+              }}
+            >
+              {/* Floating card that hugs the buttons */}
+              <Box
+                sx={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  bgcolor: "background.paper",
+                  borderRadius: 2,
+                  boxShadow: "0px 8px 32px rgba(0,0,0,0.18)",
+                  px: 3,
+                  py: 2,
+                  pointerEvents: "auto",
+                }}
+              >
+                {/* Secondary buttons group */}
+                <Stack direction="row" spacing={1.5} alignItems="center">
+                  {!orderPacked && !hungaryFactoryDemoActive ? (
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      startIcon={<HandymanOutlinedIcon />}
+                      onClick={() => setSendToFixDialogOpen(true)}
+                      sx={{
+                        width: 240,
+                        height: 48,
+                        fontSize: 16,
+                        fontWeight: 500,
+                        borderRadius: 100,
+                        borderColor: "primary.main",
+                        color: "primary.main",
+                      }}
+                    >
+                      Send to Fix
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    id="more-actions-button-v3"
+                    aria-controls={moreActionsMenuAnchor ? "more-actions-menu-v3" : undefined}
+                    aria-expanded={moreActionsMenuAnchor ? "true" : "false"}
+                    aria-haspopup="true"
+                    endIcon={<ExpandMoreIcon />}
+                    onClick={(e) => setMoreActionsMenuAnchor(e.currentTarget)}
+                    sx={{
+                      width: 280,
+                      height: 48,
+                      fontSize: 16,
+                      fontWeight: 500,
+                      px: 0,
+                      borderRadius: 100,
+                      borderColor: "primary.main",
+                      color: "primary.main",
+                    }}
+                  >
+                    More Actions
+                  </Button>
+                  <Menu
+                    id="more-actions-menu-v3"
+                    anchorEl={moreActionsMenuAnchor}
+                    open={Boolean(moreActionsMenuAnchor)}
+                    onClose={() => setMoreActionsMenuAnchor(null)}
+                    anchorOrigin={{ vertical: "top", horizontal: "center" }}
+                    transformOrigin={{ vertical: "bottom", horizontal: "center" }}
+                    slotProps={{
+                      paper: {
+                        elevation: 8,
+                        sx: { minWidth: 276, mb: 1, borderRadius: 1, py: 1, boxSizing: "border-box" },
+                      },
+                    }}
+                  >
+                    {moreActionsMenuItems.map(({ id, label, Icon }) => (
+                      <MenuItem
+                        key={id}
+                        onClick={() => {
+                          setMoreActionsMenuAnchor(null);
+                          if (id === "unpack-shipment") setPackingOrderUiStatus("readyToPack");
+                          if (id === "join-shipment") setJoinShipmentDialogOpen(true);
+                          if (id === "split-shipment") setSplitShipmentDialogOpen(true);
+                        }}
+                        sx={{ py: 0.75, px: 2, typography: "body1" }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 36 }}>
+                          <Icon sx={{ fontSize: 20, color: "action.active" }} />
+                        </ListItemIcon>
+                        {label}
+                      </MenuItem>
+                    ))}
+                  </Menu>
+                </Stack>
+
+                {/* Divider with 24px gap on each side */}
+                <Divider orientation="vertical" flexItem sx={{ mx: 3, my: 0.5 }} />
+
+                {/* Pack button */}
+                <Button
+                  key={packSuccessAnimNonce}
+                  variant="contained"
+                  color="primary"
+                  disabled={
+                    (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
+                    (trackingManualMode && manualTrackingInput.trim() === "") ||
+                    fallbackPackSubmitPhase === "loading"
+                  }
+                  onClick={() => {
+                    if (fallbackPackSubmitPhase === "loading") return;
+                    if (
+                      (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
+                      (trackingManualMode && manualTrackingInput.trim() === "")
+                    ) return;
+                    if (isFallbackPrototype) { startFallbackPackApiSimulation(); return; }
+                    if (packingOrderUiStatus === "readyToPack" && (!trackingManualMode || manualTrackingInput.trim() !== "")) {
+                      setPackingOrderUiStatus("packed");
+                      setPackSuccessAnimNonce((n) => n + 1);
+                    }
+                  }}
+                  startIcon={
+                    fallbackPackSubmitPhase === "loading" ? (
+                      <CircularProgress size={22} color="inherit" sx={{ color: "#fff !important" }} />
+                    ) : (
+                      <ShoppingBagOutlinedIcon />
+                    )
+                  }
+                  sx={{
+                    width: 280,
+                    height: 48,
+                    fontSize: 16,
+                    fontWeight: 700,
+                    borderRadius: 100,
+                    flexShrink: 0,
+                    transformOrigin: "center center",
+                    ...(packSuccessAnimNonce > 0 && {
+                      animation: `${packSuccessPop} 0.62s cubic-bezier(0.34, 1.45, 0.64, 1)`,
+                    }),
+                    ...(trackingManualMode &&
+                      packingOrderUiStatus === "readyToPack" &&
+                      manualTrackingInput.trim() !== "" && {
+                        "&:not(.Mui-disabled)": {
+                          bgcolor: "#ed6c02",
+                          color: "#fff",
+                          "&:hover": { bgcolor: "#e65100" },
+                        },
+                      }),
+                  }}
+                >
+                  {fallbackPackSubmitPhase === "loading"
+                    ? "Packing…"
+                    : trackingManualMode
+                      ? `Manual Pack ${packItemCountUi} Items`
+                      : `Pack ${packItemCountUi} Items`}
+                </Button>
+              </Box>
+            </Box>
+          )}
 
             {showOtherFacilitiesSection ? (
               <Paper
@@ -5918,6 +6463,7 @@ export default function ReadyToPack() {
                 </Stack>
               </Paper>
             ) : null}
+
           </Stack>
 
           <Box
@@ -5937,31 +6483,17 @@ export default function ReadyToPack() {
                 lg: "minmax(0, 1fr)",
               },
               gridTemplateAreas: (() => {
-                if (hidePackActionsUi) {
-                  if (showShipmentLevelInstructionsPanel) {
-                    return {
-                      xs: '"status" "remarks" "shipmentInstr"',
-                      md: '"status" "remarks" "shipmentInstr"',
-                      lg: '"status" "remarks" "shipmentInstr"',
-                    };
-                  }
-                  return {
-                    xs: '"status" "remarks"',
-                    md: '"remarks status" "remarks ."',
-                    lg: '"status" "remarks"',
-                  };
-                }
                 if (showShipmentLevelInstructionsPanel) {
                   return {
-                    xs: '"status" "remarks" "shipmentInstr" "pack"',
-                    md: '"status" "remarks" "shipmentInstr" "pack"',
-                    lg: '"status" "remarks" "shipmentInstr" "pack"',
+                    xs: '"status" "remarks" "shipmentInstr"',
+                    md: '"status" "remarks" "shipmentInstr"',
+                    lg: '"status" "remarks" "shipmentInstr"',
                   };
                 }
                 return {
-                  xs: '"status" "remarks" "pack"',
-                  md: '"remarks status" "remarks pack"',
-                  lg: '"status" "remarks" "pack"',
+                  xs: '"status" "remarks"',
+                  md: '"remarks status" "remarks ."',
+                  lg: '"status" "remarks"',
                 };
               })(),
             }}
@@ -6442,240 +6974,6 @@ export default function ReadyToPack() {
               </Paper>
             )}
 
-            {!hidePackActionsUi && (
-              <Paper
-                elevation={1}
-                sx={{
-                  gridArea: "pack",
-                  px: 3,
-                  py: 2,
-                  borderRadius: 1,
-                  ...elevationSx,
-                  minWidth: 0,
-                  alignSelf: "start",
-                }}
-              >
-                <Stack spacing={1.5}>
-                  <Button
-                    key={packSuccessAnimNonce}
-                    fullWidth
-                    variant="contained"
-                    color="primary"
-                    disabled={
-                      !itemsReviewed ||
-                      (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
-                      (trackingManualMode && manualTrackingInput.trim() === "") ||
-                      fallbackPackSubmitPhase === "loading"
-                    }
-                    onClick={() => {
-                      if (fallbackPackSubmitPhase === "loading") return;
-                      if (
-                        !itemsReviewed ||
-                        (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
-                        (trackingManualMode && manualTrackingInput.trim() === "")
-                      ) {
-                        return;
-                      }
-                      if (isFallbackPrototype) {
-                        startFallbackPackApiSimulation();
-                        return;
-                      }
-                      if (
-                        packingOrderUiStatus === "readyToPack" &&
-                        (!trackingManualMode || manualTrackingInput.trim() !== "")
-                      ) {
-                        setPackingOrderUiStatus("packed");
-                        setPackSuccessAnimNonce((n) => n + 1);
-                      }
-                    }}
-                    startIcon={
-                      fallbackPackSubmitPhase === "loading" ? (
-                        <CircularProgress size={22} color="inherit" sx={{ color: "#fff !important" }} />
-                      ) : isFallbackPrototype && fallbackPackSubmitPhase === "failed" ? (
-                        <SyncIcon sx={{ color: "#fff !important" }} />
-                      ) : (
-                        <ShoppingBagOutlinedIcon
-                          sx={
-                            trackingManualMode &&
-                            itemsReviewed &&
-                            packingOrderUiStatus === "readyToPack" &&
-                            manualTrackingInput.trim() !== ""
-                              ? { color: "#fff !important" }
-                              : undefined
-                          }
-                        />
-                      )
-                    }
-                    sx={{
-                      minHeight: 56,
-                      height: 56,
-                      py: 0,
-                      boxSizing: "border-box",
-                      fontSize: 18,
-                      fontWeight: 500,
-                      transformOrigin: "center center",
-                      ...(packSuccessAnimNonce > 0 && {
-                        animation: `${packSuccessPop} 0.62s cubic-bezier(0.34, 1.45, 0.64, 1)`,
-                      }),
-                      ...(trackingManualMode &&
-                        packingOrderUiStatus === "readyToPack" &&
-                        manualTrackingInput.trim() !== "" && {
-                          "&:not(.Mui-disabled)": {
-                            bgcolor: "#ed6c02",
-                            color: "#fff",
-                            "&:hover": { bgcolor: "#e65100" },
-                          },
-                        }),
-                    }}
-                  >
-                    {fallbackPackSubmitPhase === "loading"
-                      ? "Packing…"
-                      : isFallbackPrototype && fallbackPackSubmitPhase === "failed"
-                        ? `Retry Pack ${packItemCountUi} Items`
-                        : trackingManualMode
-                          ? `Manual Pack ${packItemCountUi} Items`
-                          : `Pack ${packItemCountUi} Items`}
-                  </Button>
-                  {(!hungaryFactoryDemoActive || orderPacked) ? (
-                    <Stack spacing={0}>
-                      {showFallbackPackButton ? (
-                        <Button
-                          fullWidth
-                          variant="outlined"
-                          color="primary"
-                          onClick={() => setFallbackPackDialogOpen(true)}
-                          sx={{
-                            minHeight: 56,
-                            height: 56,
-                            py: 0,
-                            boxSizing: "border-box",
-                            fontSize: 18,
-                            fontWeight: 500,
-                            textTransform: "none",
-                            borderColor: "primary.main",
-                            color: "primary.main",
-                          }}
-                        >
-                          Fallback Pack
-                        </Button>
-                      ) : null}
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        sx={
-                          showFallbackPackButton
-                            ? {
-                                mt: 3,
-                                borderTop: "1px solid",
-                                borderColor: "divider",
-                                pt: 3,
-                              }
-                            : undefined
-                        }
-                      >
-                        {!orderPacked && !hungaryFactoryDemoActive ? (
-                          <Button
-                            fullWidth
-                            variant="outlined"
-                            color="primary"
-                            startIcon={<HandymanOutlinedIcon />}
-                            onClick={() => setSendToFixDialogOpen(true)}
-                            sx={{
-                              minHeight: 56,
-                              height: 56,
-                              py: 0,
-                              boxSizing: "border-box",
-                              fontSize: 18,
-                              fontWeight: 500,
-                              borderColor: "primary.main",
-                              color: "primary.main",
-                            }}
-                          >
-                            Send to Fix
-                          </Button>
-                        ) : null}
-                        <Button
-                          fullWidth
-                          variant="outlined"
-                          color="primary"
-                          id="more-actions-button"
-                          aria-controls={moreActionsMenuAnchor ? "more-actions-menu" : undefined}
-                          aria-expanded={moreActionsMenuAnchor ? "true" : "false"}
-                          aria-haspopup="true"
-                          endIcon={<ExpandMoreIcon />}
-                          onClick={(e) => setMoreActionsMenuAnchor(e.currentTarget)}
-                          sx={{
-                            minHeight: 56,
-                            height: 56,
-                            py: 0,
-                            boxSizing: "border-box",
-                            fontSize: 18,
-                            fontWeight: 500,
-                            borderColor: "primary.main",
-                            color: "primary.main",
-                          }}
-                        >
-                          More Actions
-                        </Button>
-                        <Menu
-                          id="more-actions-menu"
-                          anchorEl={moreActionsMenuAnchor}
-                          open={Boolean(moreActionsMenuAnchor)}
-                          onClose={() => setMoreActionsMenuAnchor(null)}
-                          anchorOrigin={
-                            orderPacked
-                              ? { vertical: "top", horizontal: "right" }
-                              : { vertical: "bottom", horizontal: "right" }
-                          }
-                          transformOrigin={
-                            orderPacked
-                              ? { vertical: "bottom", horizontal: "right" }
-                              : { vertical: "top", horizontal: "right" }
-                          }
-                          slotProps={{
-                            paper: {
-                              elevation: 8,
-                              sx: {
-                                minWidth: 276,
-                                ...(orderPacked ? { mb: 0.5 } : { mt: 0.5 }),
-                                borderRadius: 1,
-                                py: 1,
-                                boxSizing: "border-box",
-                              },
-                            },
-                          }}
-                        >
-                          {moreActionsMenuItems.map(({ id, label, Icon }) => (
-                            <MenuItem
-                              key={id}
-                              onClick={() => {
-                                setMoreActionsMenuAnchor(null);
-                                if (id === "unpack-shipment") {
-                                  setPackingOrderUiStatus("readyToPack");
-                                  setItemsReviewed(false);
-                                }
-                                if (id === "join-shipment") setJoinShipmentDialogOpen(true);
-                                if (id === "split-shipment") setSplitShipmentDialogOpen(true);
-                              }}
-                              sx={{
-                                py: 0.75,
-                                px: 2,
-                                typography: "body1",
-                              }}
-                            >
-                              <ListItemIcon sx={{ minWidth: 36 }}>
-                                <Icon sx={{ fontSize: 20, color: "action.active" }} />
-                              </ListItemIcon>
-                              {label}
-                            </MenuItem>
-                          ))}
-                        </Menu>
-                      </Stack>
-                    </Stack>
-                  ) : null}
-                </Stack>
-              </Paper>
-            )}
           </Box>
         </Stack>
       </Box>
@@ -6694,8 +6992,7 @@ export default function ReadyToPack() {
           manualTrackingLoadedFromApiRef.current = true;
           setFallbackPackSubmitPhase("idle");
           setPackingOrderUiStatus("packed");
-          setItemsReviewed(true);
-          setPackSuccessAnimNonce((n) => n + 1);
+              setPackSuccessAnimNonce((n) => n + 1);
         }}
       />
       <CarrierShippingRouteDialog
@@ -6762,8 +7059,7 @@ export default function ReadyToPack() {
                 movable: false,
               })),
             );
-            setItemsReviewed(false);
-          }}
+                }}
         />
       )}
       {loadedOrderId && (
@@ -6778,8 +7074,7 @@ export default function ReadyToPack() {
             const newRows = nextNewItems.map((x) => ({ ...x, movable: false }));
             setPackItems(originalRows);
             setSplitTabInventories({ original: originalRows, newShipment: newRows });
-            setItemsReviewed(false);
-            setSplitLinkedPair({
+                  setSplitLinkedPair({
               original: prototypeSplitOriginalShipmentIdForTabs(sourceShipmentId),
               split: normalizeSplitNewShipmentIdForTab(newShipmentId),
             });
@@ -7301,24 +7596,57 @@ function ItemBlock({
           </Box>
         ) : null}
         {shouldShowHoldAssign ? (
-          <Box
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={1.5}
             sx={{
               flexShrink: 0,
               ml: { xs: 0, sm: "auto" },
-              width: "fit-content",
               maxWidth: "100%",
               alignSelf: "center",
             }}
           >
+            {robotCellAssignUi ? (
+              <>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  spacing={1}
+                  sx={{
+                    px: 2,
+                    minHeight: 40,
+                    borderRadius: "4px",
+                    bgcolor: purple[50],
+                    flexShrink: 0,
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <PrecisionManufacturingIcon sx={{ fontSize: 20, color: "#4A148C" }} />
+                  <Typography
+                    sx={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      lineHeight: 1.5,
+                      letterSpacing: "0.15px",
+                      color: "#4A148C",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Robot Station
+                  </Typography>
+                </Stack>
+                <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+              </>
+            ) : null}
             {itemId != null ? (
               <ItemHoldAssignContainer
                 assigned={containerAssignByItemId[itemId] ?? null}
                 onSimulateScan={() => onContainerAssignSimulate(itemId)}
                 onClear={() => onContainerAssignClear(itemId)}
-                robotStaticCellUi={robotCellAssignUi}
               />
             ) : null}
-          </Box>
+          </Stack>
         ) : null}
       </Box>
       <Stack
