@@ -5770,17 +5770,17 @@ export default function ReadyToPack() {
                         color="primary"
                         disabled={
                           (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
-                          (trackingManualMode && manualTrackingInput.trim() === "") ||
+                          (trackingManualMode && !trackingManualSaved) ||
                           fallbackPackSubmitPhase === "loading"
                         }
                         onClick={() => {
                           if (fallbackPackSubmitPhase === "loading") return;
                           if (
                             (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
-                            (trackingManualMode && manualTrackingInput.trim() === "")
+                            (trackingManualMode && !trackingManualSaved)
                           ) return;
                           if (isFallbackPrototype) { startFallbackPackApiSimulation(); return; }
-                          if (packingOrderUiStatus === "readyToPack" && (!trackingManualMode || manualTrackingInput.trim() !== "")) {
+                          if (packingOrderUiStatus === "readyToPack" && (!trackingManualMode || trackingManualSaved)) {
                             setPackingOrderUiStatus("packed");
                             setPackSuccessAnimNonce((n) => n + 1);
                           }
@@ -5805,7 +5805,7 @@ export default function ReadyToPack() {
                           }),
                           ...(trackingManualMode &&
                             packingOrderUiStatus === "readyToPack" &&
-                            manualTrackingInput.trim() !== "" && {
+                            trackingManualSaved && {
                               "&:not(.Mui-disabled)": {
                                 bgcolor: "#ed6c02",
                                 color: "#fff",
@@ -5863,14 +5863,14 @@ export default function ReadyToPack() {
                         color="primary"
                         disabled={
                           (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
-                          (trackingManualMode && manualTrackingInput.trim() === "") ||
+                          (trackingManualMode && !trackingManualSaved) ||
                           fallbackPackSubmitPhase === "loading"
                         }
                         onClick={() => {
                           if (fallbackPackSubmitPhase === "loading") return;
                           if (
                             (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
-                            (trackingManualMode && manualTrackingInput.trim() === "")
+                            (trackingManualMode && !trackingManualSaved)
                           ) {
                             return;
                           }
@@ -5880,7 +5880,7 @@ export default function ReadyToPack() {
                           }
                           if (
                             packingOrderUiStatus === "readyToPack" &&
-                            (!trackingManualMode || manualTrackingInput.trim() !== "")
+                            (!trackingManualMode || trackingManualSaved)
                           ) {
                             setPackingOrderUiStatus("packed");
                             setPackSuccessAnimNonce((n) => n + 1);
@@ -5896,7 +5896,7 @@ export default function ReadyToPack() {
                               sx={
                                 trackingManualMode &&
                                 packingOrderUiStatus === "readyToPack" &&
-                                manualTrackingInput.trim() !== ""
+                                trackingManualSaved
                                   ? { color: "#fff !important" }
                                   : undefined
                               }
@@ -5917,7 +5917,7 @@ export default function ReadyToPack() {
                           }),
                           ...(trackingManualMode &&
                             packingOrderUiStatus === "readyToPack" &&
-                            manualTrackingInput.trim() !== "" && {
+                            trackingManualSaved && {
                               "&:not(.Mui-disabled)": {
                                 bgcolor: "#ed6c02",
                                 color: "#fff",
@@ -6216,17 +6216,17 @@ export default function ReadyToPack() {
                   color="primary"
                   disabled={
                     (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
-                    (trackingManualMode && manualTrackingInput.trim() === "") ||
+                    (trackingManualMode && !trackingManualSaved) ||
                     fallbackPackSubmitPhase === "loading"
                   }
                   onClick={() => {
                     if (fallbackPackSubmitPhase === "loading") return;
                     if (
                       (packingOrderUiStatus !== "readyToPack" && packingOrderUiStatus !== "packApiFailed") ||
-                      (trackingManualMode && manualTrackingInput.trim() === "")
+                      (trackingManualMode && !trackingManualSaved)
                     ) return;
                     if (isFallbackPrototype) { startFallbackPackApiSimulation(); return; }
-                    if (packingOrderUiStatus === "readyToPack" && (!trackingManualMode || manualTrackingInput.trim() !== "")) {
+                    if (packingOrderUiStatus === "readyToPack" && (!trackingManualMode || trackingManualSaved)) {
                       setPackingOrderUiStatus("packed");
                       setPackSuccessAnimNonce((n) => n + 1);
                     }
@@ -6251,7 +6251,7 @@ export default function ReadyToPack() {
                     }),
                     ...(trackingManualMode &&
                       packingOrderUiStatus === "readyToPack" &&
-                      manualTrackingInput.trim() !== "" && {
+                      trackingManualSaved && {
                         "&:not(.Mui-disabled)": {
                           bgcolor: "#ed6c02",
                           color: "#fff",
