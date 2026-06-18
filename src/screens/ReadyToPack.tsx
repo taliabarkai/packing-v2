@@ -53,7 +53,6 @@ import {
 import { alpha, keyframes, useTheme } from "@mui/material/styles";
 import { indigo, lightBlue, orange, pink, purple, red } from "@mui/material/colors";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
-import AssignmentOutlinedIcon from "@mui/icons-material/AssignmentOutlined";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import CallSplitIcon from "@mui/icons-material/CallSplit";
 import CardGiftcardOutlinedIcon from "@mui/icons-material/CardGiftcardOutlined";
@@ -3996,7 +3995,7 @@ export default function ReadyToPack() {
   /** Synchronous intent for `fallback-supervisor` loads — the `loadedOrderId` effect must not rely on batched `orderInput` (stale closure). */
   const prototypeFallbackSupervisorLoadRef = useRef(false);
   const [packSuccessAnimNonce, setPackSuccessAnimNonce] = useState(0);
-  const [packButtonLayout, setPackButtonLayout] = useState<"v1" | "v2" | "v3">("v1");
+  const [packButtonLayout, setPackButtonLayout] = useState<"v1" | "v2" | "v3">("v2");
   const [sentToFixReason, setSentToFixReason] = useState<string | null>(null);
   /** After OK/Cancel, hide the pending notice until `loadedOrderId` changes again. */
   const [pendingShipmentDialogDismissed, setPendingShipmentDialogDismissed] = useState(false);
@@ -4729,17 +4728,6 @@ export default function ReadyToPack() {
             <Tooltip title={isFullscreen ? "Exit fullscreen" : "Fullscreen mode"}>
               <IconButton size="medium" aria-label="Toggle fullscreen" onClick={toggleFullscreen}>
                 {isFullscreen ? <FullscreenExitIcon /> : <ScreenshotMonitorIcon />}
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Go to Order Manager">
-              <IconButton
-                size="medium"
-                aria-label="Go to Order Manager"
-                onClick={() => {
-                  window.location.hash = "#/components/status-chips";
-                }}
-              >
-                <AssignmentOutlinedIcon />
               </IconButton>
             </Tooltip>
             <Chip
@@ -6069,8 +6057,8 @@ export default function ReadyToPack() {
             )}
           </Paper>
 
-          {/* Prototype layout toggle — fixed above sticky bar in V3, bottom-left otherwise */}
-          {!hidePackActionsUi && (
+          {/* Prototype layout toggle — hidden; V1/V2/V3 code preserved, toggle with useState default */}
+          {false && !hidePackActionsUi && (
             <Box
               onClick={() =>
                 setPackButtonLayout((v) => (v === "v1" ? "v2" : v === "v2" ? "v3" : "v1"))
