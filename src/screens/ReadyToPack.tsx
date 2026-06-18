@@ -3995,7 +3995,7 @@ export default function ReadyToPack() {
   /** Synchronous intent for `fallback-supervisor` loads — the `loadedOrderId` effect must not rely on batched `orderInput` (stale closure). */
   const prototypeFallbackSupervisorLoadRef = useRef(false);
   const [packSuccessAnimNonce, setPackSuccessAnimNonce] = useState(0);
-  const [packButtonLayout, setPackButtonLayout] = useState<"v1" | "v2" | "v3">("v2");
+  const [packButtonLayout, setPackButtonLayout] = useState<"v1" | "v2" | "v3">("v1");
   const [sentToFixReason, setSentToFixReason] = useState<string | null>(null);
   /** After OK/Cancel, hide the pending notice until `loadedOrderId` changes again. */
   const [pendingShipmentDialogDismissed, setPendingShipmentDialogDismissed] = useState(false);
