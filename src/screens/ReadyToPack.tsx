@@ -4590,7 +4590,7 @@ export default function ReadyToPack() {
           ...elevationSx,
           bgcolor: "background.paper",
           minHeight: 72,
-          top: 56,
+          top: isFullscreen ? 0 : 56,
           zIndex: 2,
           justifyContent: "center",
         }}
@@ -4975,12 +4975,6 @@ export default function ReadyToPack() {
                   </IconButton>
                 </Tooltip>
               </Stack>
-              <Box
-                component="img"
-                src={oakAndLunaLogo}
-                alt="Oak & Luna"
-                sx={{ height: 28, width: "auto", display: "block" }}
-              />
             </Stack>
 
             <Box
@@ -5044,7 +5038,13 @@ export default function ReadyToPack() {
                           direction="row"
                           alignItems="center"
                           spacing={0.5}
-                          sx={{ minHeight: 36, width: "100%", minWidth: 0 }}
+                          sx={{
+                            borderBottom: "1px solid transparent",
+                            pb: 0.25,
+                            minHeight: 36,
+                            width: "100%",
+                            minWidth: 0,
+                          }}
                         >
                           <Box
                             sx={{
