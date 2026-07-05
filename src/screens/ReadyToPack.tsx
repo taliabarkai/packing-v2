@@ -100,7 +100,6 @@ import {
   type PackingOrderUiStatus,
 } from "../packing/statusChipConfig";
 import oakAndLunaLogo from "../assets/oakandluna.svg";
-import logoOAL from "../assets/logos/Logo=OAL.svg";
 import logoMYKA from "../assets/logos/Logo=MYKA.svg";
 import logoLAL from "../assets/logos/Logo=LAL.svg";
 import logoIB from "../assets/logos/Logo=IB.svg";
@@ -108,12 +107,12 @@ import logoMNNCA from "../assets/logos/Logo=MNN-CA.svg";
 import logoForeverMY from "../assets/logos/Logo=ForeverMY.svg";
 import logoTheoGrace from "../assets/logos/Logo=theo grace.svg";
 import logoSETT from "../assets/logos/Logo=SETT.svg";
+import logoTGSeller from "../assets/logos/Logo=TGSeller.svg";
 import { useLayout } from "../context/LayoutContext";
 
 /** Prototype-only: brand logos cycled by clicking the header logo. */
 const PROTOTYPE_BRAND_LOGOS: { src: string; alt: string }[] = [
   { src: oakAndLunaLogo, alt: "Oak & Luna" },
-  { src: logoOAL, alt: "Oak & Luna" },
   { src: logoMYKA, alt: "MYKA" },
   { src: logoLAL, alt: "Live and Let" },
   { src: logoIB, alt: "IB" },
@@ -121,6 +120,7 @@ const PROTOTYPE_BRAND_LOGOS: { src: string; alt: string }[] = [
   { src: logoForeverMY, alt: "Forever MY" },
   { src: logoTheoGrace, alt: "Theo Grace" },
   { src: logoSETT, alt: "SETT" },
+  { src: logoTGSeller, alt: "TG Seller" },
 ];
 import product1Img from "../assets/products/product-1.png";
 import product2Img from "../assets/products/product-2.png";
