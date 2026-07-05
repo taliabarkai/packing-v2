@@ -100,7 +100,28 @@ import {
   type PackingOrderUiStatus,
 } from "../packing/statusChipConfig";
 import oakAndLunaLogo from "../assets/oakandluna.svg";
+import logoOAL from "../assets/logos/Logo=OAL.svg";
+import logoMYKA from "../assets/logos/Logo=MYKA.svg";
+import logoLAL from "../assets/logos/Logo=LAL.svg";
+import logoIB from "../assets/logos/Logo=IB.svg";
+import logoMNNCA from "../assets/logos/Logo=MNN-CA.svg";
+import logoForeverMY from "../assets/logos/Logo=ForeverMY.svg";
+import logoTheoGrace from "../assets/logos/Logo=theo grace.svg";
+import logoSETT from "../assets/logos/Logo=SETT.svg";
 import { useLayout } from "../context/LayoutContext";
+
+/** Prototype-only: brand logos cycled by clicking the header logo. */
+const PROTOTYPE_BRAND_LOGOS: { src: string; alt: string }[] = [
+  { src: oakAndLunaLogo, alt: "Oak & Luna" },
+  { src: logoOAL, alt: "Oak & Luna" },
+  { src: logoMYKA, alt: "MYKA" },
+  { src: logoLAL, alt: "Live and Let" },
+  { src: logoIB, alt: "IB" },
+  { src: logoMNNCA, alt: "MNN CA" },
+  { src: logoForeverMY, alt: "Forever MY" },
+  { src: logoTheoGrace, alt: "Theo Grace" },
+  { src: logoSETT, alt: "SETT" },
+];
 import product1Img from "../assets/products/product-1.png";
 import product2Img from "../assets/products/product-2.png";
 import product3Img from "../assets/products/product-3.png";
@@ -4024,6 +4045,9 @@ export default function ReadyToPack() {
   const [machinePopoverAnchor, setMachinePopoverAnchor] = useState<HTMLElement | null>(null);
   const [machineInputValue, setMachineInputValue] = useState("");
   const { isFullscreen, toggleFullscreen } = useLayout();
+  /** Prototype-only: index into PROTOTYPE_BRAND_LOGOS, advanced by clicking the header logo. */
+  const [brandLogoIndex, setBrandLogoIndex] = useState(0);
+  const brandLogo = PROTOTYPE_BRAND_LOGOS[brandLogoIndex];
   /** Figma 2345:27263 — per line item, container location after simulated scan. */
   const [containerAssignByItemId, setContainerAssignByItemId] = useState<
     Record<string, PrototypeContainerAssignDetail>
@@ -4609,12 +4633,23 @@ export default function ReadyToPack() {
         >
           {/* Left: brand logo + search + nav buttons */}
           <Stack direction="row" alignItems="center" spacing={4} sx={{ minWidth: 0 }}>
-            <Box
-              component="img"
-              src={oakAndLunaLogo}
-              alt="Oak &amp; Luna"
-              sx={{ height: 32, width: "auto", display: "block", flexShrink: 0 }}
-            />
+            <Tooltip title="Switch brand (prototype)">
+              <Box
+                component="img"
+                src={brandLogo.src}
+                alt={brandLogo.alt}
+                onClick={() =>
+                  setBrandLogoIndex((i) => (i + 1) % PROTOTYPE_BRAND_LOGOS.length)
+                }
+                sx={{
+                  height: 32,
+                  width: "auto",
+                  display: "block",
+                  flexShrink: 0,
+                  cursor: "pointer",
+                }}
+              />
+            </Tooltip>
             <Paper
               elevation={0}
               sx={{
@@ -4975,6 +5010,26 @@ export default function ReadyToPack() {
                   </IconButton>
                 </Tooltip>
               </Stack>
+              <Box
+                sx={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 0.5,
+                  bgcolor: pink[50],
+                  px: 1.25,
+                  py: 0.5,
+                  borderRadius: "4px",
+                  typography: "body1",
+                  letterSpacing: "0.15px",
+                }}
+              >
+                <Box component="span" sx={{ color: pink[900], fontWeight: 700 }}>
+                  Event:
+                </Box>
+                <Box component="span" sx={{ color: pink[900], fontWeight: 400 }}>
+                  51-20E
+                </Box>
+              </Box>
             </Stack>
 
             <Box
@@ -4989,7 +5044,7 @@ export default function ReadyToPack() {
                 overflowX: "auto",
                 pb: 0.5,
                 gridTemplateColumns:
-                  "minmax(118px, max-content) 145px minmax(100px, max-content) minmax(188px, max-content) 1px minmax(92px, max-content) minmax(99px, max-content) minmax(100px, max-content) minmax(52px, max-content) minmax(80px, max-content)",
+                  "minmax(118px, max-content) 145px minmax(100px, max-content) minmax(188px, max-content) 1px minmax(92px, max-content) minmax(99px, max-content) minmax(100px, max-content) minmax(52px, max-content)",
               }}
             >
               <Box sx={{ minWidth: 0, width: "100%" }}>
@@ -5294,26 +5349,6 @@ export default function ReadyToPack() {
               <Box sx={{ minWidth: 0, width: "100%" }}>
                 <FieldBlock label="Site ID">
                   <DetailValue>27</DetailValue>
-                </FieldBlock>
-              </Box>
-              <Box sx={{ minWidth: 0, width: "max-content", maxWidth: "100%", justifySelf: "start" }}>
-                <FieldBlock label="Event">
-                  <Box
-                    sx={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      bgcolor: pink[50],
-                      color: pink.A700,
-                      px: 1.25,
-                      py: 0.5,
-                      borderRadius: "50px",
-                      typography: "body1",
-                      fontWeight: 400,
-                      letterSpacing: "0.15px",
-                    }}
-                  >
-                    51-20E
-                  </Box>
                 </FieldBlock>
               </Box>
             </Box>
