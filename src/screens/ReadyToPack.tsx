@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type ReactNode,
 } from "react";
@@ -50,7 +51,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { alpha, keyframes, useTheme } from "@mui/material/styles";
+import { alpha, keyframes, useTheme, type Theme } from "@mui/material/styles";
 import { indigo, lightBlue, orange, pink, purple, red } from "@mui/material/colors";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -1168,24 +1169,35 @@ const PROTOTYPE_REMOTE_FACILITY_LOCATION_BY_ITEM_ID: Record<string, string> = {
 /** Hungary factory demo (header toggle): line 2 appears under “other facilities” without receive checkbox. */
 const HUNGARY_DEMO_OTHER_FACILITY_LINE_IDS: readonly string[] = ["pack-item-2"];
 
-/** Simulated barcode → container row after “scan” (Figma 2345:27263 / Location3). */
-const PROTOTYPE_CONTAINER_ASSIGN_CODE = "C.Y BOX 2606.KG";
-const PROTOTYPE_CONTAINER_ASSIGN_LOCATION = "שלייפ כניסה";
-/** Second prototype bin for on-hold line 2 (line 1 uses `PROTOTYPE_CONTAINER_ASSIGN_CODE`). */
-const PROTOTYPE_CONTAINER_ASSIGN_CODE_ON_HOLD_LINE_2 = "C.Y BOX 2712.KG";
-const PROTOTYPE_CONTAINER_ASSIGN_LOCATION_LINE_2 = "אזור איסוף";
+/** Assign-storage flow — how a line item is stored (a suggested cell, or a scanned container). */
+type StorageAssignment =
+  | { kind: "cell"; cell: number }
+  | { kind: "container"; barcode: string };
 
-type PrototypeContainerAssignDetail = { code: string; location: string };
+/** Total cell capacity — surfaced in the "no free cell" warning copy. */
+const PROTOTYPE_TOTAL_CELL_COUNT = 500;
 
-/** On-hold prototype: lines that use the container control arrive already assigned (user may release with ✕). */
-function buildOnHoldDefaultContainerAssignByItemId(): Record<string, PrototypeContainerAssignDetail> {
-  return {
-    "pack-item-1": { code: PROTOTYPE_CONTAINER_ASSIGN_CODE, location: PROTOTYPE_CONTAINER_ASSIGN_LOCATION },
-    "pack-item-2": {
-      code: PROTOTYPE_CONTAINER_ASSIGN_CODE_ON_HOLD_LINE_2,
-      location: PROTOTYPE_CONTAINER_ASSIGN_LOCATION_LINE_2,
-    },
-  };
+/** System-suggested cell per line item (stands in for the attach-to-cell API's suggestion). */
+const PROTOTYPE_SUGGESTED_CELL_BY_ITEM_ID: Record<string, number> = {
+  "pack-item-1": 147,
+  "pack-item-2": 148,
+};
+const PROTOTYPE_DEFAULT_SUGGESTED_CELL = 149;
+
+/** Demo toggle for the "no free cell" state: item ids listed here get no suggested cell. */
+const PROTOTYPE_NO_FREE_CELL_ITEM_IDS: readonly string[] = [];
+
+/** Suggested cell for a line item, or null when the store reports no free cell. */
+function getSuggestedCellForItem(itemId: string): number | null {
+  if (PROTOTYPE_NO_FREE_CELL_ITEM_IDS.includes(itemId)) return null;
+  return PROTOTYPE_SUGGESTED_CELL_BY_ITEM_ID[itemId] ?? PROTOTYPE_DEFAULT_SUGGESTED_CELL;
+}
+
+/** Uppercase pill label for an assigned line, e.g. "CELL 147" or "CONTAINER C.Y BOX 2606.KG". */
+function storageAssignmentLabel(assignment: StorageAssignment): string {
+  return assignment.kind === "cell"
+    ? `CELL ${assignment.cell}`
+    : `CONTAINER ${assignment.barcode}`;
 }
 
 /** Remarks list timestamps (reference: 12/12/2026, 3:23 AM). */
@@ -4048,10 +4060,12 @@ export default function ReadyToPack() {
   /** Prototype-only: index into PROTOTYPE_BRAND_LOGOS, advanced by clicking the header logo. */
   const [brandLogoIndex, setBrandLogoIndex] = useState(0);
   const brandLogo = PROTOTYPE_BRAND_LOGOS[brandLogoIndex];
-  /** Figma 2345:27263 — per line item, container location after simulated scan. */
-  const [containerAssignByItemId, setContainerAssignByItemId] = useState<
-    Record<string, PrototypeContainerAssignDetail>
+  /** Assign-storage flow — per line item, the confirmed cell/container assignment. */
+  const [storageAssignByItemId, setStorageAssignByItemId] = useState<
+    Record<string, StorageAssignment>
   >({});
+  /** Item id whose "Assign storage" popup is currently open (only one at a time), or null. */
+  const [assignStoragePopupItemId, setAssignStoragePopupItemId] = useState<string | null>(null);
 
   const orderPacked = packingOrderUiStatus === "packed";
   const orderShipped = packingOrderUiStatus === "shipped";
@@ -4387,22 +4401,40 @@ export default function ReadyToPack() {
         );
       }
     }
-    if (isOnHoldProto) {
-      setContainerAssignByItemId(buildOnHoldDefaultContainerAssignByItemId());
-    } else {
-      setContainerAssignByItemId({});
-    }
+    setStorageAssignByItemId({});
+    // On-hold: auto-open the popup for the first visible assignable line (skip remote-facility lines + gift kit).
+    const firstAssignableLineId =
+      PACK_LINE_ITEM_META.find(
+        (m) =>
+          m.id !== PACK_LINE_ITEM_META[2].id &&
+          !PROTOTYPE_ON_HOLD_REMOTE_FACILITY_ITEM_IDS.includes(m.id),
+      )?.id ?? null;
+    setAssignStoragePopupItemId(isOnHoldProto ? firstAssignableLineId : null);
   }, [loadedOrderId]);
 
-  const handleContainerAssignSimulate = (assignItemId: string) => {
-    setContainerAssignByItemId((prev) => ({
-      ...prev,
-      [assignItemId]: { code: PROTOTYPE_CONTAINER_ASSIGN_CODE, location: PROTOTYPE_CONTAINER_ASSIGN_LOCATION },
-    }));
+  const handleOpenAssignStorage = (assignItemId: string) => {
+    setAssignStoragePopupItemId(assignItemId);
   };
 
-  const handleContainerAssignClear = (assignItemId: string) => {
-    setContainerAssignByItemId((prev) => {
+  const handleCloseAssignStorage = () => {
+    setAssignStoragePopupItemId(null);
+  };
+
+  /** Attach-to-cell API confirmation — assigns the suggested cell (shipment status unchanged). */
+  const handleConfirmCellAssign = (assignItemId: string, cell: number) => {
+    setStorageAssignByItemId((prev) => ({ ...prev, [assignItemId]: { kind: "cell", cell } }));
+    setAssignStoragePopupItemId(null);
+  };
+
+  /** Scan-to-container API confirmation — assigns the scanned container (shipment status unchanged). */
+  const handleConfirmContainerAssign = (assignItemId: string, barcode: string) => {
+    setStorageAssignByItemId((prev) => ({ ...prev, [assignItemId]: { kind: "container", barcode } }));
+    setAssignStoragePopupItemId(null);
+  };
+
+  /** Release/detach API — returns the item to unassigned; shipment status is untouched. */
+  const handleReleaseStorage = (assignItemId: string) => {
+    setStorageAssignByItemId((prev) => {
       const next = { ...prev };
       delete next[assignItemId];
       return next;
@@ -5447,9 +5479,10 @@ export default function ReadyToPack() {
               <ItemBlock
                 showHoldAssignDefault={showItemContainerAssignRow}
                 robotCellAssignUi={robotCellAssignUi}
-                containerAssignByItemId={containerAssignByItemId}
-                onContainerAssignSimulate={handleContainerAssignSimulate}
-                onContainerAssignClear={handleContainerAssignClear}
+                storageAssignByItemId={storageAssignByItemId}
+                assignStoragePopupItemId={assignStoragePopupItemId}
+                onOpenAssignStorage={handleOpenAssignStorage}
+                onReleaseStorage={handleReleaseStorage}
                 title={PACK_LINE_ITEM_META[0].title}
                 image={IMG.item1}
                 imageRadius={1}
@@ -5485,9 +5518,10 @@ export default function ReadyToPack() {
                 <ItemBlock
                   showHoldAssignDefault={showItemContainerAssignRow}
                   robotCellAssignUi={robotCellAssignUi}
-                  containerAssignByItemId={containerAssignByItemId}
-                  onContainerAssignSimulate={handleContainerAssignSimulate}
-                  onContainerAssignClear={handleContainerAssignClear}
+                  storageAssignByItemId={storageAssignByItemId}
+                  assignStoragePopupItemId={assignStoragePopupItemId}
+                  onOpenAssignStorage={handleOpenAssignStorage}
+                  onReleaseStorage={handleReleaseStorage}
                   title={PACK_LINE_ITEM_META[1].title}
                   image={IMG.item2}
                   imageOverlay
@@ -5523,9 +5557,10 @@ export default function ReadyToPack() {
                 <ItemBlock
                   showHoldAssignDefault={showItemContainerAssignRow}
                   robotCellAssignUi={robotCellAssignUi}
-                  containerAssignByItemId={containerAssignByItemId}
-                  onContainerAssignSimulate={handleContainerAssignSimulate}
-                  onContainerAssignClear={handleContainerAssignClear}
+                  storageAssignByItemId={storageAssignByItemId}
+                  assignStoragePopupItemId={assignStoragePopupItemId}
+                  onOpenAssignStorage={handleOpenAssignStorage}
+                  onReleaseStorage={handleReleaseStorage}
                   title={PACK_LINE_ITEM_META[2].title}
                   image={IMG.item3}
                   imageOverlay
@@ -5563,9 +5598,10 @@ export default function ReadyToPack() {
                 <ItemBlock
                   showHoldAssignDefault={showItemContainerAssignRow}
                   robotCellAssignUi={robotCellAssignUi}
-                  containerAssignByItemId={containerAssignByItemId}
-                  onContainerAssignSimulate={handleContainerAssignSimulate}
-                  onContainerAssignClear={handleContainerAssignClear}
+                  storageAssignByItemId={storageAssignByItemId}
+                  assignStoragePopupItemId={assignStoragePopupItemId}
+                  onOpenAssignStorage={handleOpenAssignStorage}
+                  onReleaseStorage={handleReleaseStorage}
                   title={item.title}
                   image={item.image}
                   itemId={item.id}
@@ -5606,9 +5642,10 @@ export default function ReadyToPack() {
                       showHoldAssignDefault={showItemContainerAssignRow}
                       robotCellAssignUi={robotCellAssignUi}
                       remoteFacilityTitleRow={remoteReceivedItemCheckbox != null}
-                      containerAssignByItemId={containerAssignByItemId}
-                      onContainerAssignSimulate={handleContainerAssignSimulate}
-                      onContainerAssignClear={handleContainerAssignClear}
+                      storageAssignByItemId={storageAssignByItemId}
+                      assignStoragePopupItemId={assignStoragePopupItemId}
+                      onOpenAssignStorage={handleOpenAssignStorage}
+                      onReleaseStorage={handleReleaseStorage}
                       title={PACK_LINE_ITEM_META[0].title}
                       image={IMG.item1}
                       imageRadius={1}
@@ -5646,9 +5683,10 @@ export default function ReadyToPack() {
                     <ItemBlock
                       showHoldAssignDefault={showItemContainerAssignRow}
                       robotCellAssignUi={robotCellAssignUi}
-                      containerAssignByItemId={containerAssignByItemId}
-                      onContainerAssignSimulate={handleContainerAssignSimulate}
-                      onContainerAssignClear={handleContainerAssignClear}
+                      storageAssignByItemId={storageAssignByItemId}
+                      assignStoragePopupItemId={assignStoragePopupItemId}
+                      onOpenAssignStorage={handleOpenAssignStorage}
+                      onReleaseStorage={handleReleaseStorage}
                       title={PACK_LINE_ITEM_META[1].title}
                       image={IMG.item2}
                       imageOverlay
@@ -5685,9 +5723,10 @@ export default function ReadyToPack() {
                     <ItemBlock
                       showHoldAssignDefault={showItemContainerAssignRow}
                       robotCellAssignUi={robotCellAssignUi}
-                      containerAssignByItemId={containerAssignByItemId}
-                      onContainerAssignSimulate={handleContainerAssignSimulate}
-                      onContainerAssignClear={handleContainerAssignClear}
+                      storageAssignByItemId={storageAssignByItemId}
+                      assignStoragePopupItemId={assignStoragePopupItemId}
+                      onOpenAssignStorage={handleOpenAssignStorage}
+                      onReleaseStorage={handleReleaseStorage}
                       title={PACK_LINE_ITEM_META[2].title}
                       image={IMG.item3}
                       imageOverlay
@@ -6368,9 +6407,10 @@ export default function ReadyToPack() {
                               showHoldAssignDefault={false}
                               robotCellAssignUi={robotCellAssignUi}
                               remoteFacilityTitleRow
-                              containerAssignByItemId={containerAssignByItemId}
-                              onContainerAssignSimulate={handleContainerAssignSimulate}
-                              onContainerAssignClear={handleContainerAssignClear}
+                              storageAssignByItemId={storageAssignByItemId}
+                              assignStoragePopupItemId={assignStoragePopupItemId}
+                              onOpenAssignStorage={handleOpenAssignStorage}
+                              onReleaseStorage={handleReleaseStorage}
                               title={PACK_LINE_ITEM_META[0].title}
                               image={IMG.item1}
                               imageRadius={1}
@@ -6405,9 +6445,10 @@ export default function ReadyToPack() {
                             <ItemBlock
                               showHoldAssignDefault={false}
                               robotCellAssignUi={robotCellAssignUi}
-                              containerAssignByItemId={containerAssignByItemId}
-                              onContainerAssignSimulate={handleContainerAssignSimulate}
-                              onContainerAssignClear={handleContainerAssignClear}
+                              storageAssignByItemId={storageAssignByItemId}
+                              assignStoragePopupItemId={assignStoragePopupItemId}
+                              onOpenAssignStorage={handleOpenAssignStorage}
+                              onReleaseStorage={handleReleaseStorage}
                               title={PACK_LINE_ITEM_META[1].title}
                               image={IMG.item2}
                               imageOverlay
@@ -6443,9 +6484,10 @@ export default function ReadyToPack() {
                               showHoldAssignDefault={false}
                               robotCellAssignUi={robotCellAssignUi}
                               remoteFacilityTitleRow
-                              containerAssignByItemId={containerAssignByItemId}
-                              onContainerAssignSimulate={handleContainerAssignSimulate}
-                              onContainerAssignClear={handleContainerAssignClear}
+                              storageAssignByItemId={storageAssignByItemId}
+                              assignStoragePopupItemId={assignStoragePopupItemId}
+                              onOpenAssignStorage={handleOpenAssignStorage}
+                              onReleaseStorage={handleReleaseStorage}
                               title={PACK_LINE_ITEM_META[2].title}
                               image={IMG.item3}
                               imageOverlay
@@ -7024,6 +7066,13 @@ export default function ReadyToPack() {
         activeRouteId={activeCarrierRouteId}
         onSave={(id) => setActiveCarrierRouteId(id)}
       />
+      <AssignStorageDialog
+        open={assignStoragePopupItemId != null}
+        itemId={assignStoragePopupItemId}
+        onClose={handleCloseAssignStorage}
+        onConfirmCell={handleConfirmCellAssign}
+        onConfirmContainer={handleConfirmContainerAssign}
+      />
       <UpdateAddressDialog
         open={addressDialogOpen}
         onClose={() => setAddressDialogOpen(false)}
@@ -7129,313 +7178,232 @@ export default function ReadyToPack() {
   );
 }
 
-/** Prototype robot sort row: static cell label (no container / scan copy). */
-const PROTOTYPE_ROBOT_CELL_DISPLAY_TEXT = "Cell 27";
-
-/** Figma 1664:18638 default + 2345:27263 assigned (Location3): scan / container + location + clear. */
-function ItemHoldAssignContainer({
-  assigned,
-  onSimulateScan,
-  onClear,
-  robotStaticCellUi = false,
+/**
+ * Assign-storage control in the item header row: an "Assign storage" button when the line is
+ * unassigned, or an outlined-primary pill (cell / container) with a release ✕ once assigned.
+ * The popup itself lives in {@link AssignStorageDialog}; this only opens it.
+ */
+function ItemStorageAssign({
+  assignment,
+  disabled = false,
+  onAssignClick,
+  onRelease,
 }: {
-  assigned: PrototypeContainerAssignDetail | null;
-  onSimulateScan: () => void;
-  onClear: () => void;
-  /** Robot prototype + sort assign row only: “Robot” / “Cell 27” (no container / scan copy). */
-  robotStaticCellUi?: boolean;
+  assignment: StorageAssignment | null;
+  /** Dimmed idle state while another line's popup is open (only one popup at a time). */
+  disabled?: boolean;
+  onAssignClick: () => void;
+  onRelease: () => void;
 }) {
-  const leftLabel = robotStaticCellUi ? "Robot" : "Container";
-
-  const labelColumn = robotStaticCellUi ? (
-    <Box
-      sx={{
-        bgcolor: "grey.200",
-        pl: 2,
-        pr: 2,
-        py: 0.5,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        alignSelf: "stretch",
-        boxSizing: "border-box",
-      }}
-    >
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
-        <PrecisionManufacturingIcon sx={{ fontSize: 20, color: "grey.700", flexShrink: 0 }} aria-hidden />
-        <Typography
-          component="span"
-          sx={{
-            fontWeight: 500,
-            fontSize: 14,
-            lineHeight: 1.5,
-            letterSpacing: "0.15px",
-            color: "grey.900",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {leftLabel}
-        </Typography>
-      </Stack>
-    </Box>
-  ) : (
-    <Box
-      sx={{
-        bgcolor: "grey.200",
-        px: 2,
-        py: 0.5,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        alignSelf: "stretch",
-      }}
-    >
-      <Typography
-        sx={{
-          fontWeight: 500,
-          fontSize: 14,
-          lineHeight: 1.5,
-          letterSpacing: "0.15px",
-          color: "grey.900",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {leftLabel}
-      </Typography>
-    </Box>
-  );
-
-  /** Robot sort row: purely decorative label; no scan simulate or clear (Figma static). */
-  if (robotStaticCellUi) {
+  if (assignment != null) {
     return (
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "stretch",
-          width: "fit-content",
-          maxWidth: "100%",
-          minHeight: 40,
-          borderRadius: "4px",
-          border: "1px solid",
-          borderColor: "divider",
-          bgcolor: "background.default",
-          overflow: "hidden",
-          textAlign: "left",
-        }}
-      >
-        {labelColumn}
-        <Box
-          sx={{
-            flex: "0 0 auto",
-            px: 2,
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignSelf: "stretch",
-            boxSizing: "border-box",
-          }}
-        >
-          <Typography
-            component="span"
-            sx={{
-              fontSize: 14,
-              lineHeight: "24px",
-              letterSpacing: "0.15px",
-              color: "text.primary",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-              py: 0.75,
-              boxSizing: "border-box",
-            }}
-          >
-            {PROTOTYPE_ROBOT_CELL_DISPLAY_TEXT}
-          </Typography>
-        </Box>
-      </Box>
-    );
-  }
-
-  if (assigned != null) {
-    return (
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "stretch",
-          width: "fit-content",
-          maxWidth: "100%",
-          minHeight: 40,
-          borderRadius: "4px",
-          border: "1px solid",
-          borderColor: "divider",
-          bgcolor: "background.default",
-          overflow: "hidden",
-          textAlign: "left",
-        }}
-      >
-        {labelColumn}
-        <Box
-          sx={{
-            flex: "0 0 auto",
-            minWidth: 0,
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            pl: 2,
-            pr: 1,
-            py: 0.5,
-            boxSizing: "border-box",
-          }}
-        >
-          <Tooltip title="Assigned to this container. Use ✕ to release the item." enterDelay={400}>
-            <ButtonBase
-              focusRipple
-              aria-label={`Container ${assigned.code}. ${assigned.location}.`}
-              onClick={(e) => {
-                e.currentTarget.focus();
-              }}
-              sx={{
-                flex: "0 1 auto",
-                minWidth: 0,
-                maxWidth: "100%",
-                display: "flex",
-                flexDirection: "row",
-                flexWrap: "wrap",
-                alignItems: "center",
-                justifyContent: "flex-start",
-                px: 0,
-                py: 0.5,
-                gap: 0.5,
-                borderRadius: 0,
-                textAlign: "left",
-              }}
-            >
-              <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
-                <Inventory2OutlinedIcon sx={{ fontSize: 12, color: "text.primary", flexShrink: 0 }} />
-                <Typography
-                  sx={{
-                    fontSize: 12,
-                    lineHeight: 1.5,
-                    letterSpacing: "0.15px",
-                    color: "text.primary",
-                    fontWeight: 400,
-                    wordBreak: "break-word",
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  {assigned.code}
-                </Typography>
-              </Stack>
-              <Divider
-                orientation="vertical"
-                flexItem
-                sx={{ height: 18, alignSelf: "center", borderColor: "divider", mx: 0.25 }}
-              />
-              <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
-                <PushPinOutlinedIcon sx={{ fontSize: 12, color: "text.primary", flexShrink: 0 }} />
-                <Typography
-                  sx={{
-                    fontSize: 12,
-                    lineHeight: 1.5,
-                    letterSpacing: "0.15px",
-                    color: "text.primary",
-                    fontWeight: 500,
-                    wordBreak: "break-word",
-                    overflowWrap: "anywhere",
-                  }}
-                  dir="auto"
-                >
-                  {assigned.location}
-                </Typography>
-              </Stack>
-            </ButtonBase>
+      <Chip
+        variant="outlined"
+        color="primary"
+        icon={<PushPinOutlinedIcon sx={{ fontSize: 16 }} />}
+        label={storageAssignmentLabel(assignment)}
+        onDelete={onRelease}
+        deleteIcon={
+          <Tooltip title="Release item">
+            <CloseIcon aria-label="Release item" />
           </Tooltip>
-          <IconButton
-            size="small"
-            aria-label="Release item from container"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClear();
-            }}
-            sx={{ flexShrink: 0, p: 0.5, ml: 0.25 }}
-          >
-            <CloseIcon sx={{ fontSize: 16 }} />
-          </IconButton>
-        </Box>
-      </Box>
+        }
+        sx={{
+          borderRadius: "999px",
+          height: 32,
+          fontWeight: 500,
+          letterSpacing: "0.15px",
+          px: "4px",
+          "& .MuiChip-label": { px: 1, fontSize: 13 },
+          "& .MuiChip-icon": { color: "primary.main", ml: 1 },
+          "& .MuiChip-deleteIcon": { fontSize: 16, color: "primary.main", "&:hover": { color: "primary.dark" } },
+        }}
+      />
     );
   }
 
   return (
-    <Box
-      role="button"
-      tabIndex={0}
-      onClick={onSimulateScan}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSimulateScan();
-        }
-      }}
-      aria-label="Container assignment. Click to simulate scan."
+    <Button
+      variant="outlined"
+      color="primary"
+      size="small"
+      disabled={disabled}
+      onClick={onAssignClick}
+      startIcon={<DocumentScannerOutlinedIcon sx={{ fontSize: 18 }} />}
       sx={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "stretch",
-        width: "fit-content",
-        maxWidth: "100%",
-        minHeight: 40,
-        borderRadius: "4px",
-        border: "1px solid",
-        borderColor: "divider",
-        bgcolor: "background.default",
-        overflow: "hidden",
-        textAlign: "left",
-        cursor: "pointer",
-        "&:focus-visible": { outline: (theme) => `2px solid ${theme.palette.primary.main}`, outlineOffset: 2 },
+        textTransform: "uppercase",
+        letterSpacing: "0.4px",
+        flexShrink: 0,
+        py: "6px",
+        px: "16px",
       }}
     >
-      {labelColumn}
-      <Box
-        sx={{
-          flex: "0 0 auto",
-          px: 2,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignSelf: "stretch",
-          boxSizing: "border-box",
-        }}
-      >
-        <Stack
-          direction="row"
-          alignItems="center"
-          spacing={1}
-          sx={{
-            py: 0.75,
-            boxSizing: "border-box",
-          }}
-        >
-          <DocumentScannerOutlinedIcon sx={{ fontSize: 20, color: "text.disabled", flexShrink: 0 }} />
-          <Typography
-            component="span"
-            sx={{
-              fontSize: 14,
-              lineHeight: "24px",
-              letterSpacing: "0.15px",
-              color: "text.disabled",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            Scan to Assign
+      Assign storage
+    </Button>
+  );
+}
+
+/**
+ * "Assign storage" popup: pick the system-suggested cell or scan a container barcode.
+ * Cell is pre-selected; when no cell is free the cell option is disabled and container auto-selected.
+ */
+function AssignStorageDialog({
+  open,
+  itemId,
+  onClose,
+  onConfirmCell,
+  onConfirmContainer,
+}: {
+  open: boolean;
+  itemId: string | null;
+  onClose: () => void;
+  onConfirmCell: (itemId: string, cell: number) => void;
+  onConfirmContainer: (itemId: string, barcode: string) => void;
+}) {
+  const suggestedCell = itemId != null ? getSuggestedCellForItem(itemId) : null;
+  const noFreeCell = suggestedCell == null;
+  const productName =
+    (itemId != null ? PACK_LINE_ITEM_META.find((m) => m.id === itemId)?.title : undefined) ?? "";
+
+  const [choice, setChoice] = useState<"cell" | "container">("cell");
+  const [barcode, setBarcode] = useState("");
+
+  // Reset the draft each time the popup opens (for a possibly different line).
+  useEffect(() => {
+    if (!open) return;
+    setChoice(noFreeCell ? "container" : "cell");
+    setBarcode("");
+  }, [open, itemId, noFreeCell]);
+
+  const containerReady = barcode.trim().length >= 4;
+
+  const confirm = () => {
+    if (itemId == null) return;
+    if (choice === "cell" && suggestedCell != null) {
+      onConfirmCell(itemId, suggestedCell);
+    } else if (choice === "container" && containerReady) {
+      onConfirmContainer(itemId, barcode.trim());
+    }
+  };
+
+  // Hardware scanners terminate the barcode with Enter — treat that as a confirm.
+  const handleBarcodeKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key === "Enter" && containerReady) {
+      event.preventDefault();
+      confirm();
+    }
+  };
+
+  const okDisabled = choice === "cell" ? noFreeCell : !containerReady;
+  const okLabel =
+    choice === "cell"
+      ? `Assign to cell — ${suggestedCell ?? ""}`.trim()
+      : containerReady
+        ? "Assign to container"
+        : "Waiting for scan…";
+
+  const optionCardSx = (selected: boolean, cardDisabled: boolean) => ({
+    border: "1px solid",
+    borderColor: selected ? "primary.main" : "divider",
+    borderRadius: 1,
+    bgcolor: (theme: Theme) => (selected ? alpha(theme.palette.primary.main, 0.06) : theme.palette.background.paper),
+    px: 2,
+    py: 0.5,
+    opacity: cardDisabled ? 0.6 : 1,
+    "& .MuiFormControlLabel-root": { width: "100%", m: 0, py: 0.5 },
+  });
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+      <StandardDialogTitle onClose={onClose}>Assign storage</StandardDialogTitle>
+      <DialogContent sx={{ pt: 1, pb: 2 }}>
+        <Stack spacing={2}>
+          <Typography variant="body2" color="text.secondary">
+            Item: {productName}
           </Typography>
+
+          {noFreeCell ? (
+            <Alert severity="warning" sx={{ py: 0.5 }}>
+              No free cell — all {PROTOTYPE_TOTAL_CELL_COUNT} cells occupied.
+            </Alert>
+          ) : null}
+
+          <RadioGroup
+            value={choice}
+            onChange={(e) => setChoice(e.target.value as "cell" | "container")}
+          >
+            <Stack spacing={1.5}>
+              <Box sx={{ ...optionCardSx(choice === "cell", noFreeCell), "& .MuiFormControlLabel-label": { flexGrow: 1 } }}>
+                <FormControlLabel
+                  value="cell"
+                  disabled={noFreeCell}
+                  control={<Radio />}
+                  label={
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        width: "100%",
+                        gap: 1,
+                      }}
+                    >
+                      <Typography component="span">Put in cell</Typography>
+                      {noFreeCell ? null : (
+                        <Typography
+                          component="span"
+                          sx={{ color: "primary.main", fontWeight: 700, fontSize: 18, lineHeight: 1 }}
+                        >
+                          {suggestedCell}
+                        </Typography>
+                      )}
+                    </Box>
+                  }
+                />
+              </Box>
+              <Box sx={optionCardSx(choice === "container", false)}>
+                <FormControlLabel value="container" control={<Radio />} label="Scan to Container" />
+                <Collapse in={choice === "container"} unmountOnExit>
+                  <Box sx={{ pl: 4, pr: 0.5, pb: 0.5, pt: 0.5 }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      autoFocus
+                      value={barcode}
+                      onChange={(e) => setBarcode(e.target.value)}
+                      onKeyDown={handleBarcodeKeyDown}
+                      placeholder="Scan container barcode…"
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <DocumentScannerOutlinedIcon sx={{ fontSize: 18, color: "text.secondary" }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mt: 0.75 }}
+                    >
+                      Popup closes automatically once a barcode is detected.
+                    </Typography>
+                  </Box>
+                </Collapse>
+              </Box>
+            </Stack>
+          </RadioGroup>
         </Stack>
-      </Box>
-    </Box>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, py: 2, justifyContent: "space-between", alignItems: "center" }}>
+        <Button variant="text" onClick={onClose} sx={{ color: "text.secondary" }}>
+          Cancel
+        </Button>
+        <Button variant="contained" disabled={okDisabled} onClick={confirm}>
+          {okLabel}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
@@ -7453,9 +7421,10 @@ function ItemBlock({
   showHoldAssignDefault = false,
   remoteFacilityTitleRow = false,
   robotCellAssignUi = false,
-  containerAssignByItemId = {},
-  onContainerAssignSimulate = () => {},
-  onContainerAssignClear = () => {},
+  storageAssignByItemId = {},
+  assignStoragePopupItemId = null,
+  onOpenAssignStorage = () => {},
+  onReleaseStorage = () => {},
 }: {
   title: string;
   image: string;
@@ -7472,12 +7441,14 @@ function ItemBlock({
   showHoldAssignDefault?: boolean;
   /** Other-facilities row: no container assign; remarks after title; `titleRowEnd` (e.g. Item Received) aligned to the row end. */
   remoteFacilityTitleRow?: boolean;
-  /** Robot prototype (`robot` search): sort assign row uses “Robot” / “Cell 27” copy only. */
+  /** Robot prototype (`robot` search): sort assign row shows the "Robot Station" chip before the control. */
   robotCellAssignUi?: boolean;
-  /** Prototype scan → container row (Figma 2345:27263), keyed by `itemId`. */
-  containerAssignByItemId?: Record<string, PrototypeContainerAssignDetail>;
-  onContainerAssignSimulate?: (itemId: string) => void;
-  onContainerAssignClear?: (itemId: string) => void;
+  /** Assign-storage flow — per line item, the confirmed cell/container assignment. */
+  storageAssignByItemId?: Record<string, StorageAssignment>;
+  /** Item id whose popup is open (dims other lines' idle buttons until confirmed). */
+  assignStoragePopupItemId?: string | null;
+  onOpenAssignStorage?: (itemId: string) => void;
+  onReleaseStorage?: (itemId: string) => void;
 }) {
   const canOpenRemarks = itemRemarkCount > 0;
   const premiumGiftKitItemId = PACK_LINE_ITEM_META[2].id;
@@ -7663,10 +7634,11 @@ function ItemBlock({
               </>
             ) : null}
             {itemId != null ? (
-              <ItemHoldAssignContainer
-                assigned={containerAssignByItemId[itemId] ?? null}
-                onSimulateScan={() => onContainerAssignSimulate(itemId)}
-                onClear={() => onContainerAssignClear(itemId)}
+              <ItemStorageAssign
+                assignment={storageAssignByItemId[itemId] ?? null}
+                disabled={assignStoragePopupItemId != null && assignStoragePopupItemId !== itemId}
+                onAssignClick={() => onOpenAssignStorage(itemId)}
+                onRelease={() => onReleaseStorage(itemId)}
               />
             ) : null}
           </Stack>
