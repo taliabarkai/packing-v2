@@ -321,6 +321,7 @@ const PROTOTYPE_SEARCH_KEYWORDS = [
   "sort",
   "robot",
   "hold",
+  "hold-lastitem",
   "similar",
   "similar-multiple",
   "split",
@@ -361,6 +362,13 @@ const PROTOTYPE_SHIPPED_ORDER_ID = "shipped";
 const PROTOTYPE_CANCELLED_ORDER_ID = "cancelled";
 /** Prototype: on hold — search `hold` (Figma 1664:19401). */
 const PROTOTYPE_ON_HOLD_ORDER_ID = "hold";
+/**
+ * Prototype: on-hold clone of `sort` where the last physical item is up for release — search
+ * `hold-lastitem`. Auto-opens the "Release shipment" modal on load.
+ */
+const PROTOTYPE_HOLD_LAST_ITEM_ORDER_ID = "hold-lastitem";
+/** Cell the already-stored item (Engraved Compass Necklace) sits in for the `hold-lastitem` demo. */
+const PROTOTYPE_HOLD_LAST_ITEM_ASSIGNED_CELL = 148;
 /** Prototype: similar orders (same address) — search `similar`; tabs to switch orders (Figma 2314:30804). */
 const PROTOTYPE_SIMILAR_ORDERS_ORDER_ID = "similar";
 /** Same as `similar`, but join dialog lists two source shipments at once — search `similar-multiple`. */
@@ -505,6 +513,17 @@ function formatHoldReasonMessage(
   }
   return "This shipment has been manually placed on hold.";
 }
+
+/** One storage location shown as a card in the "Release shipment" modal. */
+type ReleaseLocationCardData = { kind: "cell" | "container"; value: string; itemCount: number };
+
+/** Recommended example: all items in one cell. */
+const RELEASE_EXAMPLE_SINGLE: ReleaseLocationCardData[] = [{ kind: "cell", value: "148", itemCount: 2 }];
+/** Multi-location example: items split across a cell and a container. */
+const RELEASE_EXAMPLE_MULTI: ReleaseLocationCardData[] = [
+  { kind: "cell", value: "148", itemCount: 2 },
+  { kind: "container", value: "234q3432", itemCount: 1 },
+];
 /** Next Order (prototype): sort → hold → pack → pending → manual → fallback → similar → split → packed → cancelled → (loops to sort). */
 const PROTOTYPE_NEXT_ORDER_CYCLE = [
   PROTOTYPE_SORT_STATION_ORDER_ID,
@@ -547,6 +566,10 @@ function isPrototypeCancelledOrderId(id: string | null): boolean {
 
 function isPrototypeOnHoldOrderId(id: string | null): boolean {
   return id !== null && id.toLowerCase() === PROTOTYPE_ON_HOLD_ORDER_ID;
+}
+
+function isPrototypeHoldLastItemOrderId(id: string | null): boolean {
+  return id !== null && id.toLowerCase() === PROTOTYPE_HOLD_LAST_ITEM_ORDER_ID;
 }
 
 function isPrototypeSimilarOrdersId(id: string | null): boolean {
@@ -625,6 +648,8 @@ function normalizeOrderIdForLoad(raw: string): string {
   if (lower === PROTOTYPE_PACKED_ORDER_ID) return PROTOTYPE_PACKED_ORDER_ID;
   if (lower === PROTOTYPE_SHIPPED_ORDER_ID) return PROTOTYPE_SHIPPED_ORDER_ID;
   if (lower === PROTOTYPE_CANCELLED_ORDER_ID) return PROTOTYPE_CANCELLED_ORDER_ID;
+  if (lower === PROTOTYPE_HOLD_LAST_ITEM_ORDER_ID || lower === "hold_lastitem")
+    return PROTOTYPE_HOLD_LAST_ITEM_ORDER_ID;
   if (lower === PROTOTYPE_ON_HOLD_ORDER_ID) return PROTOTYPE_ON_HOLD_ORDER_ID;
   if (lower === PROTOTYPE_SIMILAR_ORDERS_ORDER_ID) return PROTOTYPE_SIMILAR_ORDERS_ORDER_ID;
   if (lower === PROTOTYPE_SIMILAR_MULTIPLE_ORDERS_ORDER_ID) return PROTOTYPE_SIMILAR_MULTIPLE_ORDERS_ORDER_ID;
@@ -4096,6 +4121,10 @@ export default function ReadyToPack() {
   const [assignStoragePopupItemId, setAssignStoragePopupItemId] = useState<string | null>(null);
   /** Why this shipment is on hold — drives the Assign storage modal subtitle. Defaults to the awaiting-items case. */
   const [holdReasonState, setHoldReasonState] = useState<HoldReasonState>("awaiting_items");
+  /** Whether the shipment-level "Release shipment" modal is open (hold-lastitem demo). */
+  const [releaseShipmentModalOpen, setReleaseShipmentModalOpen] = useState(false);
+  /** PROTOTYPE ONLY — which release-modal example to show; click the card(s) to toggle. */
+  const [releaseExampleVariant, setReleaseExampleVariant] = useState<"single" | "multi">("single");
   /** PROTOTYPE ONLY — advance to the next hold-reason state (subtitle is clickable to preview all three). */
   const cycleHoldReasonState = () =>
     setHoldReasonState((prev) => {
@@ -4265,6 +4294,8 @@ export default function ReadyToPack() {
     awaitingItemCount,
     awaitingFacilityName,
   );
+  const releaseLocations =
+    releaseExampleVariant === "single" ? RELEASE_EXAMPLE_SINGLE : RELEASE_EXAMPLE_MULTI;
 
   const showOtherFacilitiesSection =
     !isSimilarOrdersView &&
@@ -4361,6 +4392,7 @@ export default function ReadyToPack() {
     const isFixQueue = isPrototypePendingOrderId(loadedOrderId);
     const isCancelledProto = isPrototypeCancelledOrderId(loadedOrderId);
     const isOnHoldProto = isPrototypeOnHoldOrderId(loadedOrderId);
+    const isHoldLastItemProto = isPrototypeHoldLastItemOrderId(loadedOrderId);
     const isSortStationProto = isSortingStationOrderId(loadedOrderId);
     const isRobotStationProto = isRobotStationOrderId(loadedOrderId);
     const isPackedProto = isPrototypePackedOrderId(loadedOrderId);
@@ -4371,7 +4403,7 @@ export default function ReadyToPack() {
     } else if (isFixQueue) {
       setPackingOrderUiStatus("pending");
       setSentToFixReason(PROTOTYPE_PENDING_SENT_TO_FIX_BODY);
-    } else if (isOnHoldProto || isSortStationProto || isRobotStationProto) {
+    } else if (isOnHoldProto || isHoldLastItemProto || isSortStationProto || isRobotStationProto) {
       setPackingOrderUiStatus("onHold");
       setSentToFixReason(null);
     } else if (isPackedProto) {
@@ -4450,7 +4482,12 @@ export default function ReadyToPack() {
         );
       }
     }
-    setStorageAssignByItemId({});
+    // hold-lastitem: the first jewelry line is already stored (CELL 148); the second is still unassigned.
+    setStorageAssignByItemId(
+      isHoldLastItemProto
+        ? { [PACK_LINE_ITEM_META[0].id]: { kind: "cell", cell: PROTOTYPE_HOLD_LAST_ITEM_ASSIGNED_CELL } }
+        : {},
+    );
     // On-hold: auto-open the popup for the first visible assignable line (skip remote-facility lines + gift kit).
     const firstAssignableLineId =
       PACK_LINE_ITEM_META.find(
@@ -4459,6 +4496,9 @@ export default function ReadyToPack() {
           !PROTOTYPE_ON_HOLD_REMOTE_FACILITY_ITEM_IDS.includes(m.id),
       )?.id ?? null;
     setAssignStoragePopupItemId(isOnHoldProto ? firstAssignableLineId : null);
+    // hold-lastitem: the last physical item is up for release → auto-open the Release shipment modal.
+    setReleaseShipmentModalOpen(isHoldLastItemProto);
+    setReleaseExampleVariant("single");
   }, [loadedOrderId]);
 
   const handleOpenAssignStorage = (assignItemId: string) => {
@@ -4468,6 +4508,16 @@ export default function ReadyToPack() {
   const handleCloseAssignStorage = () => {
     setAssignStoragePopupItemId(null);
   };
+
+  /** Release shipment confirm — all items collected → lift the hold and move to Ready to Pack. */
+  const handleReleaseShipmentConfirm = () => {
+    setReleaseShipmentModalOpen(false);
+    setPackingOrderUiStatus("readyToPack");
+  };
+
+  /** PROTOTYPE ONLY — toggle the release modal between the single-cell and multi-location examples. */
+  const cycleReleaseExample = () =>
+    setReleaseExampleVariant((variant) => (variant === "single" ? "multi" : "single"));
 
   /** Attach-to-cell API confirmation — assigns the suggested cell (shipment status unchanged). */
   const handleConfirmCellAssign = (assignItemId: string, cell: number) => {
@@ -6742,7 +6792,9 @@ export default function ReadyToPack() {
                     </MenuItem>
                   </Menu>
                 </Stack>
-                {packingOrderUiStatus === "onHold" && !isSortingStationView ? (
+                {packingOrderUiStatus === "onHold" &&
+                !isSortingStationView &&
+                !isPrototypeHoldLastItemOrderId(loadedOrderId) ? (
                   <Alert
                     data-node-id="2052:23611"
                     severity="info"
@@ -7128,6 +7180,18 @@ export default function ReadyToPack() {
         // PROTOTYPE ONLY — clicking the subtitle cycles hold states. Drop this prop before shipping.
         onCycleHoldReason={SHOW_HOLD_STATE_PREVIEW ? cycleHoldReasonState : undefined}
       />
+      <AssignStorageDialog
+        mode="release"
+        open={releaseShipmentModalOpen}
+        itemId={null}
+        releaseLocations={releaseLocations}
+        onClose={() => setReleaseShipmentModalOpen(false)}
+        onConfirmRelease={handleReleaseShipmentConfirm}
+        onConfirmCell={handleConfirmCellAssign}
+        onConfirmContainer={handleConfirmContainerAssign}
+        // PROTOTYPE ONLY — click a location card to toggle single-cell vs multi-location example.
+        onCycleReleaseExample={cycleReleaseExample}
+      />
       <UpdateAddressDialog
         open={addressDialogOpen}
         onClose={() => setAddressDialogOpen(false)}
@@ -7233,6 +7297,64 @@ export default function ReadyToPack() {
   );
 }
 
+/** Filled location card in the "Release shipment" modal — icon, CELL/CONTAINER value, and item count. */
+function ReleaseLocationCard({
+  location,
+  onClick,
+}: {
+  location: ReleaseLocationCardData;
+  onClick?: () => void;
+}) {
+  const isCell = location.kind === "cell";
+  const itemCountLabel = location.itemCount === 1 ? "1 item" : `${location.itemCount} items`;
+  return (
+    <Box
+      onClick={onClick}
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        gap: 2,
+        px: 2,
+        py: 1.5,
+        borderRadius: 1,
+        border: "1px solid",
+        borderColor: "primary.main",
+        bgcolor: (theme) => alpha(theme.palette.primary.main, 0.06),
+        cursor: onClick ? "pointer" : "default",
+      }}
+    >
+      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+        <Typography
+          sx={{
+            color: "primary.main",
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: "0.4px",
+            textTransform: "uppercase",
+            lineHeight: 1.4,
+          }}
+        >
+          {isCell ? "Cell" : "Container"}
+        </Typography>
+        <Typography
+          sx={{
+            color: "primary.main",
+            fontSize: 20,
+            fontWeight: 700,
+            lineHeight: 1.2,
+            wordBreak: "break-word",
+          }}
+        >
+          {location.value}
+        </Typography>
+      </Box>
+      <Typography sx={{ color: "primary.main", fontSize: 14, flexShrink: 0 }}>
+        {itemCountLabel}
+      </Typography>
+    </Box>
+  );
+}
+
 /**
  * Assign-storage control in the item header row: an "Assign storage" button when the line is
  * unassigned, or an outlined-primary pill (cell / container) with a release ✕ once assigned.
@@ -7306,25 +7428,38 @@ function ItemStorageAssign({
 function AssignStorageDialog({
   open,
   itemId,
-  holdReasonMessage,
+  mode = "assign",
+  holdReasonMessage = "",
+  releaseLocations = [],
   existingAssignments = {},
   onClose,
   onConfirmCell,
   onConfirmContainer,
+  onConfirmRelease,
   onCycleHoldReason,
+  onCycleReleaseExample,
 }: {
   open: boolean;
   itemId: string | null;
+  /** "assign" = pick a cell/container for one item; "release" = shipment-level release (no radios). */
+  mode?: "assign" | "release";
   /** Hold-reason description sentence shown as the subtitle (why storage is being assigned). */
-  holdReasonMessage: string;
+  holdReasonMessage?: string;
+  /** Release variant: the cells/containers to collect the shipment's items from, shown as cards. */
+  releaseLocations?: ReleaseLocationCardData[];
   /** Confirmed assignments for the other lines in this order — used to recommend the same cell/container. */
   existingAssignments?: Record<string, StorageAssignment>;
   onClose: () => void;
   onConfirmCell: (itemId: string, cell: number) => void;
   onConfirmContainer: (itemId: string, barcode: string) => void;
+  /** Release variant confirm — lift the hold. */
+  onConfirmRelease?: () => void;
   /** PROTOTYPE ONLY — when set, clicking the subtitle cycles through the hold-reason states. */
   onCycleHoldReason?: () => void;
+  /** PROTOTYPE ONLY — when set, clicking a release location card toggles the example. */
+  onCycleReleaseExample?: () => void;
 }) {
+  const isRelease = mode === "release";
   // All lines belong to the same order → if a sibling is already stored somewhere, keep this item with it.
   const siblingAssignment = useMemo<StorageAssignment | null>(() => {
     for (const [id, assignment] of Object.entries(existingAssignments)) {
@@ -7403,19 +7538,38 @@ function AssignStorageDialog({
       // ~15% wider than the default "xs" (444px) breakpoint.
       sx={{ "& .MuiDialog-paper": { maxWidth: 512 } }}
     >
-      <StandardDialogTitle onClose={onClose}>Assign storage</StandardDialogTitle>
+      <StandardDialogTitle onClose={onClose}>
+        {isRelease ? "Release shipment" : "Assign storage"}
+      </StandardDialogTitle>
       <DialogContent sx={{ pt: 1, pb: 2 }}>
         <Stack spacing={2}>
-          <Typography
-            variant="body1"
-            color="text.primary"
-            onClick={onCycleHoldReason}
-            sx={onCycleHoldReason ? { cursor: "pointer" } : undefined}
-          >
-            {holdReasonMessage}
-          </Typography>
+          {isRelease ? (
+            <>
+              <Typography variant="body1" color="text.primary">
+                All items are accounted for. Collect from:
+              </Typography>
+              <Stack spacing={1.5}>
+                {releaseLocations.map((location, idx) => (
+                  <ReleaseLocationCard
+                    key={`${location.kind}-${location.value}-${idx}`}
+                    location={location}
+                    onClick={onCycleReleaseExample}
+                  />
+                ))}
+              </Stack>
+            </>
+          ) : (
+            <Typography
+              variant="body1"
+              color="text.primary"
+              onClick={onCycleHoldReason}
+              sx={onCycleHoldReason ? { cursor: "pointer" } : undefined}
+            >
+              {holdReasonMessage}
+            </Typography>
+          )}
 
-          {siblingAssignment != null ? (
+          {!isRelease && siblingAssignment != null ? (
             <Alert severity="info" icon={<Inventory2OutlinedIcon fontSize="inherit" />} sx={{ py: 0.5 }}>
               Another item from this shipment is already in{" "}
               <Box component="span" sx={{ fontWeight: 700 }}>
@@ -7425,12 +7579,13 @@ function AssignStorageDialog({
             </Alert>
           ) : null}
 
-          {noFreeCell ? (
+          {!isRelease && noFreeCell ? (
             <Alert severity="warning" sx={{ py: 0.5 }}>
               No free cell — all {PROTOTYPE_TOTAL_CELL_COUNT} cells occupied.
             </Alert>
           ) : null}
 
+          {!isRelease ? (
           <RadioGroup
             value={choice}
             onChange={(e) => setChoice(e.target.value as "cell" | "container")}
@@ -7496,15 +7651,22 @@ function AssignStorageDialog({
               </Box>
             </Stack>
           </RadioGroup>
+          ) : null}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pt: 2, pb: 3, justifyContent: "space-between", alignItems: "center" }}>
         <Button variant="text" onClick={onClose} sx={{ color: "text.secondary" }}>
           Cancel
         </Button>
-        <Button variant="contained" disabled={okDisabled} onClick={confirm}>
-          {okLabel}
-        </Button>
+        {isRelease ? (
+          <Button variant="contained" onClick={onConfirmRelease}>
+            Release shipment
+          </Button>
+        ) : (
+          <Button variant="contained" disabled={okDisabled} onClick={confirm}>
+            {okLabel}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );
