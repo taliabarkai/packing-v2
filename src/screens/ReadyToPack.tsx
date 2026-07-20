@@ -67,6 +67,7 @@ import PendingOutlinedIcon from "@mui/icons-material/PendingOutlined";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import DocumentScannerOutlinedIcon from "@mui/icons-material/DocumentScannerOutlined";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import ExitToAppOutlinedIcon from "@mui/icons-material/ExitToAppOutlined";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import HandymanOutlinedIcon from "@mui/icons-material/HandymanOutlined";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
@@ -91,7 +92,6 @@ import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import SyncIcon from "@mui/icons-material/Sync";
 import PlaceOutlinedIcon from "@mui/icons-material/PlaceOutlined";
 import PrecisionManufacturingIcon from "@mui/icons-material/PrecisionManufacturing";
-import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 
 import { LinkedShipmentTabs, type LinkedShipmentTabItem } from "../components/LinkedShipmentTabs";
 import { loadNewSplitShipmentIdFromApi } from "../api/loadNewSplitShipmentId";
@@ -477,6 +477,34 @@ const PROTOTYPE_CANCELLED_STATUS_BODY =
   "This shipment was cancelled. Do not pack or ship. Contact CSR if you need more information.";
 /** On-hold status banner under Status row (Figma 2052:23611). */
 const ON_HOLD_AWAITING_ITEM_BODY = "This shipment is awaiting 1 item from Nazareth.";
+
+/** Why a shipment is on hold — drives the description sentence in the Assign storage modal. */
+type HoldReasonState = "csr_hold" | "awaiting_items" | "manual_hold";
+
+/**
+ * PROTOTYPE ONLY — flips on a small floating switcher to preview the three hold-reason
+ * messages live. Set to false (or delete the guarded block) before shipping.
+ */
+const SHOW_HOLD_STATE_PREVIEW = true;
+const HOLD_STATE_PREVIEW_OPTIONS: { value: HoldReasonState; label: string }[] = [
+  { value: "csr_hold", label: "CSR hold" },
+  { value: "awaiting_items", label: "Awaiting items" },
+  { value: "manual_hold", label: "Manual hold" },
+];
+
+/** Hold-reason description sentence shown as the Assign storage modal subtitle. */
+function formatHoldReasonMessage(
+  state: HoldReasonState,
+  awaitingCount: number,
+  facilityName: string,
+): string {
+  if (state === "csr_hold") return "This shipment is on hold by CSR.";
+  if (state === "awaiting_items") {
+    const itemNoun = awaitingCount === 1 ? "item" : "items";
+    return `This shipment is awaiting ${awaitingCount} ${itemNoun} from ${facilityName}.`;
+  }
+  return "This shipment has been manually placed on hold.";
+}
 /** Next Order (prototype): sort → hold → pack → pending → manual → fallback → similar → split → packed → cancelled → (loops to sort). */
 const PROTOTYPE_NEXT_ORDER_CYCLE = [
   PROTOTYPE_SORT_STATION_ORDER_ID,
@@ -4066,6 +4094,14 @@ export default function ReadyToPack() {
   >({});
   /** Item id whose "Assign storage" popup is currently open (only one at a time), or null. */
   const [assignStoragePopupItemId, setAssignStoragePopupItemId] = useState<string | null>(null);
+  /** Why this shipment is on hold — drives the Assign storage modal subtitle. Defaults to the awaiting-items case. */
+  const [holdReasonState, setHoldReasonState] = useState<HoldReasonState>("awaiting_items");
+  /** PROTOTYPE ONLY — advance to the next hold-reason state (subtitle is clickable to preview all three). */
+  const cycleHoldReasonState = () =>
+    setHoldReasonState((prev) => {
+      const idx = HOLD_STATE_PREVIEW_OPTIONS.findIndex((o) => o.value === prev);
+      return HOLD_STATE_PREVIEW_OPTIONS[(idx + 1) % HOLD_STATE_PREVIEW_OPTIONS.length].value;
+    });
 
   const orderPacked = packingOrderUiStatus === "packed";
   const orderShipped = packingOrderUiStatus === "shipped";
@@ -4216,6 +4252,19 @@ export default function ReadyToPack() {
   const remoteFacilityIdsForUi = hungaryFactoryDemoActive
     ? [...HUNGARY_DEMO_OTHER_FACILITY_LINE_IDS]
     : remoteFacilityItemIds;
+
+  // Hold-reason subtitle for the Assign storage modal. For the awaiting-items case, source the
+  // count + facility from the items still in other facilities on this shipment.
+  const awaitingItemCount = remoteFacilityIdsForUi.length || 1;
+  const awaitingFacilityName =
+    (remoteFacilityIdsForUi.length > 0
+      ? PROTOTYPE_REMOTE_FACILITY_LOCATION_BY_ITEM_ID[remoteFacilityIdsForUi[0]]
+      : undefined) ?? "Nazareth";
+  const holdReasonMessage = formatHoldReasonMessage(
+    holdReasonState,
+    awaitingItemCount,
+    awaitingFacilityName,
+  );
 
   const showOtherFacilitiesSection =
     !isSimilarOrdersView &&
@@ -5634,14 +5683,17 @@ export default function ReadyToPack() {
               const showRemoteLeadDivider =
                 anyPrimaryPackLineVisibleUi || extraPackItemsUi.length > 0 || remoteIdx > 0;
               if (rid === PACK_LINE_ITEM_META[0].id) {
+                // Received from another facility → now in "Items to Pack": keep the checked
+                // "Item Received" checkbox (so the worker can uncheck to send it back) and show
+                // the unassigned "Assign storage" button to its right. Popup is not auto-opened.
                 const remoteReceivedItemCheckbox = remoteFacilityItemReceivedControl(rid);
                 return (
                   <Box key={`remote-received-${rid}`}>
                     {showRemoteLeadDivider ? <Divider sx={{ my: 3 }} /> : null}
                     <ItemBlock
                       showHoldAssignDefault={showItemContainerAssignRow}
+                      assignRowLeading={remoteReceivedItemCheckbox ?? undefined}
                       robotCellAssignUi={robotCellAssignUi}
-                      remoteFacilityTitleRow={remoteReceivedItemCheckbox != null}
                       storageAssignByItemId={storageAssignByItemId}
                       assignStoragePopupItemId={assignStoragePopupItemId}
                       onOpenAssignStorage={handleOpenAssignStorage}
@@ -5652,7 +5704,6 @@ export default function ReadyToPack() {
                       itemId={PACK_LINE_ITEM_META[0].id}
                       itemRemarkCount={remarkCountByItemId[PACK_LINE_ITEM_META[0].id] ?? 0}
                       onItemRemarksClick={() => openItemRemarksDialog(PACK_LINE_ITEM_META[0].id)}
-                      titleRowEnd={remoteReceivedItemCheckbox ?? undefined}
                       details={
                         <>
                           <SectionOverline>Details</SectionOverline>
@@ -7069,9 +7120,13 @@ export default function ReadyToPack() {
       <AssignStorageDialog
         open={assignStoragePopupItemId != null}
         itemId={assignStoragePopupItemId}
+        holdReasonMessage={holdReasonMessage}
+        existingAssignments={storageAssignByItemId}
         onClose={handleCloseAssignStorage}
         onConfirmCell={handleConfirmCellAssign}
         onConfirmContainer={handleConfirmContainerAssign}
+        // PROTOTYPE ONLY — clicking the subtitle cycles hold states. Drop this prop before shipping.
+        onCycleHoldReason={SHOW_HOLD_STATE_PREVIEW ? cycleHoldReasonState : undefined}
       />
       <UpdateAddressDialog
         open={addressDialogOpen}
@@ -7200,23 +7255,22 @@ function ItemStorageAssign({
       <Chip
         variant="outlined"
         color="primary"
-        icon={<PushPinOutlinedIcon sx={{ fontSize: 16 }} />}
+        size="medium"
         label={storageAssignmentLabel(assignment)}
         onDelete={onRelease}
         deleteIcon={
           <Tooltip title="Release item">
-            <CloseIcon aria-label="Release item" />
+            <ExitToAppOutlinedIcon aria-label="Release item" />
           </Tooltip>
         }
         sx={{
           borderRadius: "999px",
-          height: 32,
+          height: 40,
           fontWeight: 500,
           letterSpacing: "0.15px",
-          px: "4px",
-          "& .MuiChip-label": { px: 1, fontSize: 13 },
-          "& .MuiChip-icon": { color: "primary.main", ml: 1 },
-          "& .MuiChip-deleteIcon": { fontSize: 16, color: "primary.main", "&:hover": { color: "primary.dark" } },
+          px: "8px",
+          "& .MuiChip-label": { px: 1.25, fontSize: 14 },
+          "& .MuiChip-deleteIcon": { fontSize: 20, color: "primary.main", "&:hover": { color: "primary.dark" } },
         }}
       />
     );
@@ -7246,24 +7300,45 @@ function ItemStorageAssign({
 /**
  * "Assign storage" popup: pick the system-suggested cell or scan a container barcode.
  * Cell is pre-selected; when no cell is free the cell option is disabled and container auto-selected.
+ * If another line in the same order is already stored, that cell/container is recommended instead so
+ * the order stays together (a sibling container pre-fills and selects the scan option).
  */
 function AssignStorageDialog({
   open,
   itemId,
+  holdReasonMessage,
+  existingAssignments = {},
   onClose,
   onConfirmCell,
   onConfirmContainer,
+  onCycleHoldReason,
 }: {
   open: boolean;
   itemId: string | null;
+  /** Hold-reason description sentence shown as the subtitle (why storage is being assigned). */
+  holdReasonMessage: string;
+  /** Confirmed assignments for the other lines in this order — used to recommend the same cell/container. */
+  existingAssignments?: Record<string, StorageAssignment>;
   onClose: () => void;
   onConfirmCell: (itemId: string, cell: number) => void;
   onConfirmContainer: (itemId: string, barcode: string) => void;
+  /** PROTOTYPE ONLY — when set, clicking the subtitle cycles through the hold-reason states. */
+  onCycleHoldReason?: () => void;
 }) {
-  const suggestedCell = itemId != null ? getSuggestedCellForItem(itemId) : null;
+  // All lines belong to the same order → if a sibling is already stored somewhere, keep this item with it.
+  const siblingAssignment = useMemo<StorageAssignment | null>(() => {
+    for (const [id, assignment] of Object.entries(existingAssignments)) {
+      if (id !== itemId) return assignment;
+    }
+    return null;
+  }, [existingAssignments, itemId]);
+  const siblingCell = siblingAssignment?.kind === "cell" ? siblingAssignment.cell : null;
+  const siblingContainer = siblingAssignment?.kind === "container" ? siblingAssignment.barcode : null;
+
+  const systemSuggestedCell = itemId != null ? getSuggestedCellForItem(itemId) : null;
+  // Prefer the sibling's cell so the order stays together; otherwise fall back to the system suggestion.
+  const suggestedCell = siblingCell ?? systemSuggestedCell;
   const noFreeCell = suggestedCell == null;
-  const productName =
-    (itemId != null ? PACK_LINE_ITEM_META.find((m) => m.id === itemId)?.title : undefined) ?? "";
 
   const [choice, setChoice] = useState<"cell" | "container">("cell");
   const [barcode, setBarcode] = useState("");
@@ -7271,9 +7346,15 @@ function AssignStorageDialog({
   // Reset the draft each time the popup opens (for a possibly different line).
   useEffect(() => {
     if (!open) return;
+    // A sibling already scanned into a container → default to that container, pre-filled.
+    if (siblingContainer != null) {
+      setChoice("container");
+      setBarcode(siblingContainer);
+      return;
+    }
     setChoice(noFreeCell ? "container" : "cell");
     setBarcode("");
-  }, [open, itemId, noFreeCell]);
+  }, [open, itemId, noFreeCell, siblingContainer]);
 
   const containerReady = barcode.trim().length >= 4;
 
@@ -7314,13 +7395,35 @@ function AssignStorageDialog({
   });
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="xs"
+      fullWidth
+      // ~15% wider than the default "xs" (444px) breakpoint.
+      sx={{ "& .MuiDialog-paper": { maxWidth: 512 } }}
+    >
       <StandardDialogTitle onClose={onClose}>Assign storage</StandardDialogTitle>
       <DialogContent sx={{ pt: 1, pb: 2 }}>
         <Stack spacing={2}>
-          <Typography variant="body2" color="text.secondary">
-            Item: {productName}
+          <Typography
+            variant="body1"
+            color="text.primary"
+            onClick={onCycleHoldReason}
+            sx={onCycleHoldReason ? { cursor: "pointer" } : undefined}
+          >
+            {holdReasonMessage}
           </Typography>
+
+          {siblingAssignment != null ? (
+            <Alert severity="info" icon={<Inventory2OutlinedIcon fontSize="inherit" />} sx={{ py: 0.5 }}>
+              Another item from this shipment is already in{" "}
+              <Box component="span" sx={{ fontWeight: 700 }}>
+                {siblingCell != null ? `cell ${siblingCell}` : `container ${siblingContainer}`}
+              </Box>
+              .
+            </Alert>
+          ) : null}
 
           {noFreeCell ? (
             <Alert severity="warning" sx={{ py: 0.5 }}>
@@ -7395,7 +7498,7 @@ function AssignStorageDialog({
           </RadioGroup>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, py: 2, justifyContent: "space-between", alignItems: "center" }}>
+      <DialogActions sx={{ px: 3, pt: 2, pb: 3, justifyContent: "space-between", alignItems: "center" }}>
         <Button variant="text" onClick={onClose} sx={{ color: "text.secondary" }}>
           Cancel
         </Button>
@@ -7418,6 +7521,7 @@ function ItemBlock({
   itemRemarkCount = 0,
   onItemRemarksClick,
   titleRowEnd,
+  assignRowLeading,
   showHoldAssignDefault = false,
   remoteFacilityTitleRow = false,
   robotCellAssignUi = false,
@@ -7437,6 +7541,8 @@ function ItemBlock({
   onItemRemarksClick?: () => void;
   /** e.g. “Item received” control (Figma 2052:23611). */
   titleRowEnd?: ReactNode;
+  /** Rendered inside the right-aligned assign row, before the "Assign storage" button (e.g. a kept "Item Received" checkbox). */
+  assignRowLeading?: ReactNode;
   /** Figma 1664:18640 — show hold / container assign control (on-hold shipment). */
   showHoldAssignDefault?: boolean;
   /** Other-facilities row: no container assign; remarks after title; `titleRowEnd` (e.g. Item Received) aligned to the row end. */
@@ -7601,6 +7707,9 @@ function ItemBlock({
               alignSelf: "center",
             }}
           >
+            {assignRowLeading != null ? (
+              <Box sx={{ flexShrink: 0 }}>{assignRowLeading}</Box>
+            ) : null}
             {robotCellAssignUi ? (
               <>
                 <Stack
