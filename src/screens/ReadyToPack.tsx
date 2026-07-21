@@ -6000,6 +6000,7 @@ export default function ReadyToPack() {
                         {moreActionsMenuItems.map(({ id, label, Icon }) => (
                           <MenuItem
                             key={id}
+                            disabled={id === "reprint-packing-label"}
                             onClick={() => {
                               setMoreActionsMenuAnchor(null);
                               if (id === "unpack-shipment") setPackingOrderUiStatus("readyToPack");
@@ -6207,6 +6208,7 @@ export default function ReadyToPack() {
                               {moreActionsMenuItems.map(({ id, label, Icon }) => (
                                 <MenuItem
                                   key={id}
+                                  disabled={id === "reprint-packing-label"}
                                   onClick={() => {
                                     setMoreActionsMenuAnchor(null);
                                     if (id === "unpack-shipment") setPackingOrderUiStatus("readyToPack");
@@ -6352,6 +6354,7 @@ export default function ReadyToPack() {
                     {moreActionsMenuItems.map(({ id, label, Icon }) => (
                       <MenuItem
                         key={id}
+                        disabled={id === "reprint-packing-label"}
                         onClick={() => {
                           setMoreActionsMenuAnchor(null);
                           if (id === "unpack-shipment") setPackingOrderUiStatus("readyToPack");
