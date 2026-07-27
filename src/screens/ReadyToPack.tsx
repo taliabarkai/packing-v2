@@ -92,6 +92,7 @@ import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import SyncIcon from "@mui/icons-material/Sync";
 import PlaceOutlinedIcon from "@mui/icons-material/PlaceOutlined";
 import PrecisionManufacturingIcon from "@mui/icons-material/PrecisionManufacturing";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 
 import { LinkedShipmentTabs, type LinkedShipmentTabItem } from "../components/LinkedShipmentTabs";
 import { loadNewSplitShipmentIdFromApi } from "../api/loadNewSplitShipmentId";
@@ -942,22 +943,273 @@ const PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM =
 const PROTOTYPE_PACKING_INSTRUCTIONS_SMALL =
   "Pack this item in the Small box. Secure the chain in the compartment before sealing.";
 
-function ItemPackingInstructionsCard({
-  imageSrc,
-  bodyText,
-  layout = "item",
+/**
+ * A single packing instruction. `text` is required; `image` is optional and
+ * independent per instruction — an instruction is text-only or text+image
+ * regardless of what the others in its list carry.
+ */
+type PackingInstruction = { text: string; image?: string };
+
+/**
+ * Shapes accepted for the `instructions` prop: the canonical array, a single
+ * instruction object, or a legacy single object using the old `bodyText`/
+ * `imageSrc` field names. Everything is normalized on read for backward compat.
+ */
+type PackingInstructionInput =
+  | { text?: string; image?: string; bodyText?: string; imageSrc?: string }
+  | PackingInstruction;
+
+/** Normalize any accepted instruction input into a clean array; drops empties. */
+function normalizeInstructions(
+  input: PackingInstructionInput | PackingInstructionInput[] | null | undefined,
+): PackingInstruction[] {
+  if (!input) return [];
+  const arr = Array.isArray(input) ? input : [input];
+  return arr
+    .map((entry) => {
+      const raw = entry as { text?: string; image?: string; bodyText?: string; imageSrc?: string };
+      const text = (raw.text ?? raw.bodyText ?? "").toString().trim();
+      const image = raw.image ?? raw.imageSrc ?? undefined;
+      return { text, image: image || undefined };
+    })
+    .filter((entry) => entry.text.length > 0);
+}
+
+/** Prototype: a shipment with 3 instructions — mix of text+image and text-only. */
+const PROTOTYPE_SHIPMENT_INSTRUCTIONS: PackingInstruction[] = [
+  { text: PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM, image: IMG.boxMedium },
+  { text: "Customer requested no branded packaging — use a plain box and omit all marketing inserts." },
+  { text: "Include the handwritten gift note and place it on top before sealing the box.", image: IMG.boxSmall },
+];
+
+/** Prototype: an item with 3 instructions — mix of text+image and text-only. */
+const PROTOTYPE_ITEM_INSTRUCTIONS: PackingInstruction[] = [
+  { text: PROTOTYPE_PACKING_INSTRUCTIONS_SMALL, image: IMG.boxSmall },
+  { text: "Fragile chain — coil it loosely and add a foam wrap before boxing." },
+  { text: "Double-check the engraving matches the order before sealing the box.", image: IMG.boxMedium },
+];
+
+/** Prototype: the single-instruction variant, for the item-level tap-to-swap demo. */
+const PROTOTYPE_ITEM_INSTRUCTIONS_SINGLE: PackingInstruction[] = [
+  { text: PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM, image: IMG.boxMedium },
+];
+
+/** Small amber numbered marker (1, 2, 3…) shown beside each instruction in the multi list. */
+function InstructionNumberBadge({ n }: { n: number }) {
+  return (
+    <Box
+      sx={{
+        flexShrink: 0,
+        mt: "1px",
+        width: 22,
+        height: 22,
+        borderRadius: "50%",
+        bgcolor: "#fff4e5",
+        color: "#663c00",
+        border: "1px solid #ffcc80",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 12,
+        fontWeight: 700,
+        lineHeight: 1,
+      }}
+    >
+      {n}
+    </Box>
+  );
+}
+
+/**
+ * Multiple-instruction rendering: an amber alert header with a count, then every
+ * instruction fully expanded and stacked with a numbered marker and dividers.
+ * Nothing is collapsed, truncated, paginated, or hidden behind a click. Each
+ * row's layout adapts independently to whether that instruction has an image.
+ */
+function MultiInstructionsList({
+  list,
+  isShipment,
 }: {
-  imageSrc: string;
-  bodyText: string;
+  list: PackingInstruction[];
+  isShipment: boolean;
+}) {
+  const px = isShipment ? 3 : 2;
+  return (
+    <Box sx={{ width: "100%", minWidth: 0, boxSizing: "border-box" }}>
+      <Stack
+        direction="row"
+        spacing={1}
+        alignItems="center"
+        sx={{
+          px,
+          py: 1.25,
+          bgcolor: "#fff4e5",
+          borderBottom: "1px solid",
+          borderColor: "#ffe0b2",
+        }}
+      >
+        <WarningAmberRoundedIcon sx={{ fontSize: 20, color: "#ed6c02" }} />
+        <Typography
+          variant="subtitle2"
+          sx={{ fontWeight: 700, letterSpacing: "0.15px", color: "#663c00" }}
+        >
+          {list.length} instructions — read all before packing
+        </Typography>
+      </Stack>
+
+      {list.map((entry, index) => (
+        <Fragment key={index}>
+          {index > 0 ? <Divider /> : null}
+          <Stack
+            direction="row"
+            spacing={1.5}
+            alignItems="flex-start"
+            sx={{ px, py: 1.5, minWidth: 0 }}
+          >
+            <InstructionNumberBadge n={index + 1} />
+            <Typography
+              variant="body2"
+              color="text.primary"
+              sx={{ flex: "1 1 auto", minWidth: 0, letterSpacing: "0.15px", lineHeight: 1.5 }}
+            >
+              {entry.text}
+            </Typography>
+            {entry.image ? (
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  width: 96,
+                  height: 96,
+                  bgcolor: "#eeeff1",
+                  borderRadius: 0.5,
+                  overflow: "hidden",
+                }}
+              >
+                <Box
+                  component="img"
+                  src={entry.image}
+                  alt=""
+                  sx={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+              </Box>
+            ) : null}
+          </Stack>
+        </Fragment>
+      ))}
+    </Box>
+  );
+}
+
+function ItemPackingInstructionsCard({
+  instructions,
+  layout = "item",
+  prototypeVariants,
+}: {
+  instructions?: PackingInstructionInput | PackingInstructionInput[] | null | undefined;
   layout?: "item" | "shipment";
+  /**
+   * Prototype-only: instruction-list variants to cycle through on click
+   * (e.g. [single, multiple]). Lets the prototype demo the single vs. multiple
+   * states in one order without loading a different order. When provided,
+   * clicking the card advances to the next variant instead of the image-only toggle.
+   */
+  prototypeVariants?: (PackingInstructionInput | PackingInstructionInput[])[];
 }) {
   const [imageOnly, setImageOnly] = useState(false);
+  const [variantIndex, setVariantIndex] = useState(0);
   const isShipment = layout === "shipment";
+
+  const cycleEnabled = Array.isArray(prototypeVariants) && prototypeVariants.length > 1;
+  const activeInstructions = cycleEnabled
+    ? prototypeVariants[variantIndex % prototypeVariants.length]
+    : instructions;
+  const list = normalizeInstructions(activeInstructions);
+
+  const cycleVariant = () => {
+    if (!cycleEnabled) return;
+    setImageOnly(false);
+    setVariantIndex((i) => (i + 1) % prototypeVariants.length);
+  };
+
+  const nextList = cycleEnabled
+    ? normalizeInstructions(prototypeVariants[(variantIndex + 1) % prototypeVariants.length])
+    : [];
+  const nextLabel = nextList.length > 1 ? `${nextList.length} instructions` : "single instruction";
+
+  const prototypeHint = cycleEnabled ? (
+    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ px: 0.5, color: "text.secondary" }}>
+      <SwapHorizIcon sx={{ fontSize: 16 }} />
+      <Typography variant="caption" sx={{ letterSpacing: "0.2px" }}>
+        Prototype · tap to view {nextLabel}
+      </Typography>
+    </Stack>
+  ) : null;
+
+  const wrap = (card: ReactNode) =>
+    cycleEnabled ? (
+      <Box
+        sx={{
+          display: "inline-flex",
+          flexDirection: "column",
+          alignItems: "stretch",
+          gap: 0.75,
+          width: { xs: "100%", sm: isShipment ? "100%" : "fit-content" },
+        }}
+      >
+        {card}
+        {prototypeHint}
+      </Box>
+    ) : (
+      card
+    );
+
+  if (list.length === 0) return null;
+
+  // More than one instruction → amber alert header + fully-expanded stacked list.
+  if (list.length > 1) {
+    if (isShipment) {
+      return wrap(
+        <Box
+          onClick={cycleEnabled ? cycleVariant : undefined}
+          sx={{ cursor: cycleEnabled ? "pointer" : "default" }}
+        >
+          <MultiInstructionsList list={list} isShipment />
+        </Box>,
+      );
+    }
+    return wrap(
+      <Paper
+        variant="outlined"
+        elevation={0}
+        onClick={cycleEnabled ? cycleVariant : undefined}
+        sx={{
+          borderRadius: 2,
+          overflow: "hidden",
+          borderColor: "divider",
+          width: { xs: "100%", sm: "fit-content" },
+          minWidth: { sm: 320 },
+          maxWidth: { xs: "100%", sm: 460 },
+          boxSizing: "border-box",
+          cursor: cycleEnabled ? "pointer" : "default",
+        }}
+      >
+        <MultiInstructionsList list={list} isShipment={false} />
+      </Paper>,
+    );
+  }
+
+  // Exactly one instruction → existing neutral rendering (blue header, image-only
+  // toggle preserved). Image is optional, so skip its column when absent.
+  const { text: bodyText, image: imageSrc } = list[0];
+  const hasImage = Boolean(imageSrc);
   const title = isShipment ? "Packing Instructions" : "Instructions";
+  const showImageOnly = imageOnly && hasImage;
 
-  const toggleView = () => setImageOnly((v) => !v);
+  const toggleView = () => {
+    if (hasImage) setImageOnly((v) => !v);
+  };
 
-  const imageColumn = (
+  const imageColumn = hasImage ? (
     <Box
       sx={{
         flexShrink: 0,
@@ -983,9 +1235,9 @@ function ItemPackingInstructionsCard({
         }}
       />
     </Box>
-  );
+  ) : null;
 
-  const textStack = !imageOnly ? (
+  const textStack = !showImageOnly ? (
     <Stack spacing={1} sx={{ flex: "1 1 auto", minWidth: 0, justifyContent: "center", pr: 2 }}>
       <Typography variant="subtitle2" sx={{ fontWeight: 600, letterSpacing: "0.15px", color: "#01579b" }}>
         {title}
@@ -996,7 +1248,7 @@ function ItemPackingInstructionsCard({
     </Stack>
   ) : null;
 
-  const itemTextStack = !imageOnly ? (
+  const itemTextStack = !showImageOnly ? (
     <Stack
       spacing={1}
       sx={{
@@ -1025,16 +1277,24 @@ function ItemPackingInstructionsCard({
     textAlign: "left" as const,
   };
 
+  const singleClick = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    if (cycleEnabled) cycleVariant();
+    else toggleView();
+  };
+  const singleAriaLabel = cycleEnabled
+    ? `Show ${nextLabel}`
+    : showImageOnly
+      ? "Show packing instructions text"
+      : "Show image only";
+
   if (isShipment) {
-    return (
+    return wrap(
       <ButtonBase
         component="div"
-        onClick={(e) => {
-          e.preventDefault();
-          toggleView();
-        }}
-        aria-label={imageOnly ? "Show packing instructions text" : "Show image only"}
-        aria-pressed={imageOnly}
+        onClick={singleClick}
+        aria-label={singleAriaLabel}
+        aria-pressed={cycleEnabled ? undefined : showImageOnly}
         focusRipple
         sx={toggleShellSx}
       >
@@ -1044,7 +1304,7 @@ function ItemPackingInstructionsCard({
             flexDirection: { xs: "column", sm: "row" },
             flexWrap: "nowrap",
             alignItems: "center",
-            justifyContent: imageOnly ? "center" : undefined,
+            justifyContent: showImageOnly ? "center" : undefined,
             width: "100%",
             minWidth: 0,
             boxSizing: "border-box",
@@ -1055,19 +1315,16 @@ function ItemPackingInstructionsCard({
           {textStack}
           {imageColumn}
         </Box>
-      </ButtonBase>
+      </ButtonBase>,
     );
   }
 
-  return (
+  return wrap(
     <ButtonBase
       component="div"
-      onClick={(e) => {
-        e.preventDefault();
-        toggleView();
-      }}
-      aria-label={imageOnly ? "Show packing instructions text" : "Show image only"}
-      aria-pressed={imageOnly}
+      onClick={singleClick}
+      aria-label={singleAriaLabel}
+      aria-pressed={cycleEnabled ? undefined : showImageOnly}
       focusRipple
       sx={{
         ...toggleShellSx,
@@ -1082,7 +1339,7 @@ function ItemPackingInstructionsCard({
           flexDirection: { xs: "column", sm: "row" },
           flexWrap: "nowrap",
           alignItems: { xs: "stretch", sm: "center" },
-          justifyContent: imageOnly ? "center" : undefined,
+          justifyContent: showImageOnly ? "center" : undefined,
           borderRadius: 2,
           overflow: "visible",
           borderColor: "divider",
@@ -1095,7 +1352,7 @@ function ItemPackingInstructionsCard({
         {itemTextStack}
         {imageColumn}
       </Paper>
-    </ButtonBase>
+    </ButtonBase>,
   );
 }
 
@@ -4144,6 +4401,8 @@ export default function ReadyToPack() {
   const isSplitOrdersView = isPrototypeSplitOrdersId(loadedOrderId);
   const isFallbackPrototype = isPrototypeFallbackOrderId(loadedOrderId);
   const showShipmentLevelInstructionsPanel = isPrototypeInstructionShipmentLevelOrderId(loadedOrderId);
+  /** Item-level instructions prototype: demo the first item with multiple instructions. */
+  const showItemLevelMultiInstructionsDemo = isPrototypeInstructionItemLevelOrderId(loadedOrderId);
   const hideInlineItemPackingInstructions = showShipmentLevelInstructionsPanel;
   const sidebarSingleColumnMd = showShipmentLevelInstructionsPanel;
   const showFallbackPackButton =
@@ -5603,8 +5862,9 @@ export default function ReadyToPack() {
                 packaging={
                   hideInlineItemPackingInstructions ? null : (
                     <ItemPackingInstructionsCard
-                      imageSrc={IMG.boxMedium}
-                      bodyText={PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM}
+                      {...(showItemLevelMultiInstructionsDemo
+                        ? { prototypeVariants: [PROTOTYPE_ITEM_INSTRUCTIONS, PROTOTYPE_ITEM_INSTRUCTIONS_SINGLE] }
+                        : { instructions: [{ text: PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM, image: IMG.boxMedium }] })}
                     />
                   )
                 }
@@ -5641,8 +5901,7 @@ export default function ReadyToPack() {
                   packaging={
                     hideInlineItemPackingInstructions ? null : (
                       <ItemPackingInstructionsCard
-                        imageSrc={IMG.boxSmall}
-                        bodyText={PROTOTYPE_PACKING_INSTRUCTIONS_SMALL}
+                        instructions={[{ text: PROTOTYPE_PACKING_INSTRUCTIONS_SMALL, image: IMG.boxSmall }]}
                       />
                     )
                   }
@@ -5768,8 +6027,9 @@ export default function ReadyToPack() {
                       packaging={
                         hideInlineItemPackingInstructions ? null : (
                           <ItemPackingInstructionsCard
-                            imageSrc={IMG.boxMedium}
-                            bodyText={PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM}
+                            {...(showItemLevelMultiInstructionsDemo
+                        ? { prototypeVariants: [PROTOTYPE_ITEM_INSTRUCTIONS, PROTOTYPE_ITEM_INSTRUCTIONS_SINGLE] }
+                        : { instructions: [{ text: PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM, image: IMG.boxMedium }] })}
                           />
                         )
                       }
@@ -5808,8 +6068,7 @@ export default function ReadyToPack() {
                       packaging={
                         hideInlineItemPackingInstructions ? null : (
                           <ItemPackingInstructionsCard
-                            imageSrc={IMG.boxSmall}
-                            bodyText={PROTOTYPE_PACKING_INSTRUCTIONS_SMALL}
+                            instructions={[{ text: PROTOTYPE_PACKING_INSTRUCTIONS_SMALL, image: IMG.boxSmall }]}
                           />
                         )
                       }
@@ -6538,8 +6797,9 @@ export default function ReadyToPack() {
                               packaging={
                                 hideInlineItemPackingInstructions ? null : (
                                   <ItemPackingInstructionsCard
-                                    imageSrc={IMG.boxMedium}
-                                    bodyText={PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM}
+                                    {...(showItemLevelMultiInstructionsDemo
+                        ? { prototypeVariants: [PROTOTYPE_ITEM_INSTRUCTIONS, PROTOTYPE_ITEM_INSTRUCTIONS_SINGLE] }
+                        : { instructions: [{ text: PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM, image: IMG.boxMedium }] })}
                                   />
                                 )
                               }
@@ -6576,8 +6836,7 @@ export default function ReadyToPack() {
                               packaging={
                                 hideInlineItemPackingInstructions ? null : (
                                   <ItemPackingInstructionsCard
-                                    imageSrc={IMG.boxSmall}
-                                    bodyText={PROTOTYPE_PACKING_INSTRUCTIONS_SMALL}
+                                    instructions={[{ text: PROTOTYPE_PACKING_INSTRUCTIONS_SMALL, image: IMG.boxSmall }]}
                                   />
                                 )
                               }
@@ -7139,8 +7398,7 @@ export default function ReadyToPack() {
               >
                 <ItemPackingInstructionsCard
                   layout="shipment"
-                  imageSrc={IMG.boxMedium}
-                  bodyText={PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM}
+                  instructions={PROTOTYPE_SHIPMENT_INSTRUCTIONS}
                 />
               </Paper>
             )}
