@@ -982,6 +982,11 @@ const PROTOTYPE_SHIPMENT_INSTRUCTIONS: PackingInstruction[] = [
   { text: "Include the handwritten gift note and place it on top before sealing the box.", image: IMG.boxSmall },
 ];
 
+/** Prototype: the single-instruction variant, for the shipment-level tap-to-swap demo. */
+const PROTOTYPE_SHIPMENT_INSTRUCTIONS_SINGLE: PackingInstruction[] = [
+  { text: PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM, image: IMG.boxMedium },
+];
+
 /** Prototype: an item with 3 instructions — mix of text+image and text-only. */
 const PROTOTYPE_ITEM_INSTRUCTIONS: PackingInstruction[] = [
   { text: PROTOTYPE_PACKING_INSTRUCTIONS_SMALL, image: IMG.boxSmall },
@@ -7371,7 +7376,7 @@ export default function ReadyToPack() {
               >
                 <ItemPackingInstructionsCard
                   layout="shipment"
-                  instructions={PROTOTYPE_SHIPMENT_INSTRUCTIONS}
+                  prototypeVariants={[PROTOTYPE_SHIPMENT_INSTRUCTIONS, PROTOTYPE_SHIPMENT_INSTRUCTIONS_SINGLE]}
                 />
               </Paper>
             )}
