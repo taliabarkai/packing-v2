@@ -1136,48 +1136,21 @@ function ItemPackingInstructionsCard({
     : [];
   const nextLabel = nextList.length > 1 ? `${nextList.length} instructions` : "single instruction";
 
-  const prototypeHint = cycleEnabled ? (
-    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ px: 0.5, color: "text.secondary" }}>
-      <SwapHorizIcon sx={{ fontSize: 16 }} />
-      <Typography variant="caption" sx={{ letterSpacing: "0.2px" }}>
-        Prototype · tap to view {nextLabel}
-      </Typography>
-    </Stack>
-  ) : null;
-
-  const wrap = (card: ReactNode) =>
-    cycleEnabled ? (
-      <Box
-        sx={{
-          display: "inline-flex",
-          flexDirection: "column",
-          alignItems: "stretch",
-          gap: 0.75,
-          width: { xs: "100%", sm: isShipment ? "100%" : "fit-content" },
-        }}
-      >
-        {card}
-        {prototypeHint}
-      </Box>
-    ) : (
-      card
-    );
-
   if (list.length === 0) return null;
 
   // More than one instruction → amber alert header + fully-expanded stacked list.
   if (list.length > 1) {
     if (isShipment) {
-      return wrap(
+      return (
         <Box
           onClick={cycleEnabled ? cycleVariant : undefined}
           sx={{ cursor: cycleEnabled ? "pointer" : "default" }}
         >
           <MultiInstructionsList list={list} isShipment />
-        </Box>,
+        </Box>
       );
     }
-    return wrap(
+    return (
       <Paper
         variant="outlined"
         elevation={0}
@@ -1194,7 +1167,7 @@ function ItemPackingInstructionsCard({
         }}
       >
         <MultiInstructionsList list={list} isShipment={false} />
-      </Paper>,
+      </Paper>
     );
   }
 
@@ -1289,7 +1262,7 @@ function ItemPackingInstructionsCard({
       : "Show image only";
 
   if (isShipment) {
-    return wrap(
+    return (
       <ButtonBase
         component="div"
         onClick={singleClick}
@@ -1315,11 +1288,11 @@ function ItemPackingInstructionsCard({
           {textStack}
           {imageColumn}
         </Box>
-      </ButtonBase>,
+      </ButtonBase>
     );
   }
 
-  return wrap(
+  return (
     <ButtonBase
       component="div"
       onClick={singleClick}
@@ -1352,7 +1325,7 @@ function ItemPackingInstructionsCard({
         {itemTextStack}
         {imageColumn}
       </Paper>
-    </ButtonBase>,
+    </ButtonBase>
   );
 }
 
