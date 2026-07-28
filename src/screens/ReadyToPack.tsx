@@ -944,9 +944,9 @@ const PROTOTYPE_PACKING_INSTRUCTIONS_SMALL =
   "Pack this item in the Small box. Secure the chain in the compartment before sealing.";
 
 /**
- * A single packing instruction. `text` is required; `image` is optional and
- * independent per instruction — an instruction is text-only or text+image
- * regardless of what the others in its list carry.
+ * A single packing instruction. `text` and `image` are independent per instruction —
+ * an instruction can be text-only, image-only, or both, regardless of what the
+ * others in its list carry. Only entries with neither are dropped.
  */
 type PackingInstruction = { text: string; image?: string };
 
@@ -972,7 +972,7 @@ function normalizeInstructions(
       const image = raw.image ?? raw.imageSrc ?? undefined;
       return { text, image: image || undefined };
     })
-    .filter((entry) => entry.text.length > 0);
+    .filter((entry) => entry.text.length > 0 || Boolean(entry.image));
 }
 
 /** Prototype: a shipment with 3 instructions — mix of text+image and text-only. */
@@ -987,11 +987,11 @@ const PROTOTYPE_SHIPMENT_INSTRUCTIONS_SINGLE: PackingInstruction[] = [
   { text: PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM, image: IMG.boxMedium },
 ];
 
-/** Prototype: an item with 3 instructions — mix of text+image and text-only. */
+/** Prototype: an item with 3 instructions — text+image, then text-only, then image-only. */
 const PROTOTYPE_ITEM_INSTRUCTIONS: PackingInstruction[] = [
   { text: PROTOTYPE_PACKING_INSTRUCTIONS_SMALL, image: IMG.boxSmall },
   { text: "Fragile chain — coil it loosely and add a foam wrap before boxing." },
-  { text: "Double-check the engraving matches the order before sealing the box.", image: IMG.boxMedium },
+  { text: "", image: IMG.boxMedium },
 ];
 
 /** Prototype: the single-instruction variant, for the item-level tap-to-swap demo. */
@@ -999,37 +999,91 @@ const PROTOTYPE_ITEM_INSTRUCTIONS_SINGLE: PackingInstruction[] = [
   { text: PROTOTYPE_PACKING_INSTRUCTIONS_MEDIUM, image: IMG.boxMedium },
 ];
 
-/** Small amber numbered marker (1, 2, 3…) shown beside each instruction in the multi list. */
-function InstructionNumberBadge({ n }: { n: number }) {
+/** Inner padding of the instructions card — identical for the single and multiple states. */
+function instructionsCardPadding(isShipment: boolean) {
+  return isShipment ? 3 : 2;
+}
+
+/** Instruction image tile size — identical whether there is one instruction or several. */
+const INSTRUCTION_IMAGE_SIZE = 96;
+
+/**
+ * Item-level card footprint: one fixed width for the single and multiple states so the
+ * card never widens with its content and squeezes the Details column beside it.
+ * (32px padding + 96px image + 24px gap leaves 262px for the instruction text.)
+ */
+const INSTRUCTIONS_CARD_WIDTH = 414;
+
+/**
+ * The “Packing Instructions” title band: its own row at the top of the card, always
+ * closed by a full-width divider, whether there is one instruction or several. When
+ * there are several, the read-all-before-packing alert sits inline beside the title.
+ */
+function InstructionsCardHeader({
+  count,
+  isShipment,
+}: {
+  count: number;
+  isShipment: boolean;
+}) {
   return (
     <Box
       sx={{
-        flexShrink: 0,
-        mt: "1px",
-        width: 22,
-        height: 22,
-        borderRadius: "50%",
-        bgcolor: "#fff4e5",
-        color: "#663c00",
-        border: "1px solid #ffcc80",
+        minWidth: 0,
+        px: instructionsCardPadding(isShipment),
+        py: 1.5,
+        borderBottom: "1px solid",
+        borderColor: "divider",
         display: "flex",
+        flexDirection: "row",
         alignItems: "center",
-        justifyContent: "center",
-        fontSize: 12,
-        fontWeight: 700,
-        lineHeight: 1,
+        flexWrap: "nowrap",
+        columnGap: 2,
       }}
     >
-      {n}
+      <Typography
+        variant="subtitle2"
+        sx={{
+          flexShrink: 0,
+          fontWeight: 600,
+          letterSpacing: "0.15px",
+          color: "#01579b",
+          whiteSpace: "nowrap",
+        }}
+      >
+        Packing Instructions
+      </Typography>
+      {count > 1 ? (
+        <Stack
+          direction="row"
+          spacing={0.5}
+          alignItems="center"
+          sx={{ minWidth: 0, flex: "1 1 auto" }}
+        >
+          <WarningAmberRoundedIcon sx={{ fontSize: 18, color: "#ed6c02", flexShrink: 0 }} />
+          <Typography
+            variant="caption"
+            sx={{
+              minWidth: 0,
+              fontWeight: 700,
+              letterSpacing: "0.15px",
+              color: "#663c00",
+              lineHeight: 1.4,
+            }}
+          >
+            Multiple instructions — read all before packing
+          </Typography>
+        </Stack>
+      ) : null}
     </Box>
   );
 }
 
 /**
- * Multiple-instruction rendering: an amber alert header with a count, then every
- * instruction fully expanded and stacked with a numbered marker and dividers.
- * Nothing is collapsed, truncated, paginated, or hidden behind a click. Each
- * row's layout adapts independently to whether that instruction has an image.
+ * Multiple-instruction rendering: the shared “Packing Instructions” title, then every
+ * instruction fully expanded and stacked below it, separated by dividers. Nothing is
+ * collapsed, truncated, paginated, or hidden behind a click. Each row's layout adapts
+ * independently to whether that instruction has an image.
  */
 function MultiInstructionsList({
   list,
@@ -1038,53 +1092,39 @@ function MultiInstructionsList({
   list: PackingInstruction[];
   isShipment: boolean;
 }) {
-  const px = isShipment ? 3 : 2;
   return (
     <Box sx={{ width: "100%", minWidth: 0, boxSizing: "border-box" }}>
-      <Stack
-        direction="row"
-        spacing={1}
-        alignItems="center"
-        sx={{
-          px,
-          py: 1.25,
-          bgcolor: "#fff4e5",
-          borderBottom: "1px solid",
-          borderColor: "#ffe0b2",
-        }}
-      >
-        <WarningAmberRoundedIcon sx={{ fontSize: 20, color: "#ed6c02" }} />
-        <Typography
-          variant="subtitle2"
-          sx={{ fontWeight: 700, letterSpacing: "0.15px", color: "#663c00" }}
-        >
-          {list.length} instructions — read all before packing
-        </Typography>
-      </Stack>
+      <InstructionsCardHeader count={list.length} isShipment={isShipment} />
 
       {list.map((entry, index) => (
         <Fragment key={index}>
           {index > 0 ? <Divider /> : null}
           <Stack
             direction="row"
-            spacing={1.5}
+            spacing={2}
             alignItems="flex-start"
-            sx={{ px, py: 1.5, minWidth: 0 }}
+            justifyContent={entry.text ? undefined : "flex-end"}
+            sx={{
+              px: instructionsCardPadding(isShipment),
+              py: 2,
+              minWidth: 0,
+            }}
           >
-            <InstructionNumberBadge n={index + 1} />
-            <Typography
-              variant="body2"
-              color="text.primary"
-              sx={{ flex: "1 1 auto", minWidth: 0, letterSpacing: "0.15px", lineHeight: 1.5 }}
-            >
-              {entry.text}
-            </Typography>
+            {entry.text ? (
+              <Typography
+                variant="body2"
+                color="text.primary"
+                sx={{ flex: "1 1 auto", minWidth: 0, letterSpacing: "0.15px", lineHeight: 1.5 }}
+              >
+                {entry.text}
+              </Typography>
+            ) : null}
             {entry.image ? (
               <Box
                 sx={{
                   flexShrink: 0,
-                  width: 96,
-                  height: 96,
+                  width: INSTRUCTION_IMAGE_SIZE,
+                  height: INSTRUCTION_IMAGE_SIZE,
                   bgcolor: "#eeeff1",
                   borderRadius: 0.5,
                   overflow: "hidden",
@@ -1164,9 +1204,8 @@ function ItemPackingInstructionsCard({
           borderRadius: 2,
           overflow: "hidden",
           borderColor: "divider",
-          width: { xs: "100%", sm: "fit-content" },
-          minWidth: { sm: 320 },
-          maxWidth: { xs: "100%", sm: 460 },
+          width: { xs: "100%", sm: INSTRUCTIONS_CARD_WIDTH },
+          maxWidth: "100%",
           boxSizing: "border-box",
           cursor: cycleEnabled ? "pointer" : "default",
         }}
@@ -1176,11 +1215,11 @@ function ItemPackingInstructionsCard({
     );
   }
 
-  // Exactly one instruction → existing neutral rendering (blue header, image-only
-  // toggle preserved). Image is optional, so skip its column when absent.
+  // Exactly one instruction → same padded shell and same “Packing Instructions”
+  // title as the multiple state, with the instruction text and its optional image
+  // side by side below the title. Image-only toggle preserved.
   const { text: bodyText, image: imageSrc } = list[0];
   const hasImage = Boolean(imageSrc);
-  const title = isShipment ? "Packing Instructions" : "Instructions";
   const showImageOnly = imageOnly && hasImage;
 
   const toggleView = () => {
@@ -1193,9 +1232,8 @@ function ItemPackingInstructionsCard({
         flexShrink: 0,
         alignSelf: "center",
         display: "flex",
-        width: { xs: "min(100%, 150px)", sm: 150 },
-        maxWidth: 150,
-        aspectRatio: "1",
+        width: INSTRUCTION_IMAGE_SIZE,
+        height: INSTRUCTION_IMAGE_SIZE,
         bgcolor: "#eeeff1",
         borderRadius: 0.5,
         overflow: "hidden",
@@ -1205,47 +1243,45 @@ function ItemPackingInstructionsCard({
         component="img"
         src={imageSrc}
         alt=""
-        sx={{
-          width: "100%",
-          height: "100%",
-          objectFit: isShipment ? "cover" : "contain",
-          display: "block",
-        }}
+        sx={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
       />
     </Box>
   ) : null;
 
-  const textStack = !showImageOnly ? (
-    <Stack spacing={1} sx={{ flex: "1 1 auto", minWidth: 0, justifyContent: "center", pr: 2 }}>
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, letterSpacing: "0.15px", color: "#01579b" }}>
-        {title}
-      </Typography>
-      <Typography variant="body2" color="text.primary" sx={{ letterSpacing: "0.15px", lineHeight: 1.5 }}>
-        {bodyText}
-      </Typography>
-    </Stack>
-  ) : null;
-
-  const itemTextStack = !showImageOnly ? (
-    <Stack
-      spacing={1}
-      sx={{
-        flex: "1 1 auto",
-        minWidth: 0,
-        maxWidth: 262,
-        boxSizing: "border-box",
-        p: 2,
-        justifyContent: "center",
-      }}
-    >
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, letterSpacing: "0.15px", color: "#01579b" }}>
-        {title}
-      </Typography>
-      <Typography variant="body2" color="text.primary" sx={{ letterSpacing: "0.15px", lineHeight: 1.5 }}>
-        {bodyText}
-      </Typography>
-    </Stack>
-  ) : null;
+  const singleBody = (
+    <Box sx={{ width: "100%", minWidth: 0, boxSizing: "border-box" }}>
+      {!showImageOnly ? <InstructionsCardHeader count={1} isShipment={isShipment} /> : null}
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        spacing={3}
+        alignItems="center"
+        justifyContent={showImageOnly ? "center" : undefined}
+        sx={{
+          width: "100%",
+          minWidth: 0,
+          boxSizing: "border-box",
+          px: instructionsCardPadding(isShipment),
+          py: 2,
+        }}
+      >
+        {!showImageOnly && bodyText ? (
+          <Typography
+            variant="body2"
+            color="text.primary"
+            sx={{
+              flex: "1 1 auto",
+              minWidth: 0,
+              letterSpacing: "0.15px",
+              lineHeight: 1.5,
+            }}
+          >
+            {bodyText}
+          </Typography>
+        ) : null}
+        {imageColumn}
+      </Stack>
+    </Box>
+  );
 
   const toggleShellSx = {
     width: "100%",
@@ -1276,23 +1312,7 @@ function ItemPackingInstructionsCard({
         focusRipple
         sx={toggleShellSx}
       >
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: { xs: "column", sm: "row" },
-            flexWrap: "nowrap",
-            alignItems: "center",
-            justifyContent: showImageOnly ? "center" : undefined,
-            width: "100%",
-            minWidth: 0,
-            boxSizing: "border-box",
-            gap: 0,
-            pl: 3,
-          }}
-        >
-          {textStack}
-          {imageColumn}
-        </Box>
+        {singleBody}
       </ButtonBase>
     );
   }
@@ -1306,7 +1326,8 @@ function ItemPackingInstructionsCard({
       focusRipple
       sx={{
         ...toggleShellSx,
-        width: { xs: "100%", sm: "fit-content" },
+        width: { xs: "100%", sm: INSTRUCTIONS_CARD_WIDTH },
+        maxWidth: "100%",
       }}
     >
       <Paper
@@ -1314,21 +1335,16 @@ function ItemPackingInstructionsCard({
         elevation={0}
         sx={{
           display: "flex",
-          flexDirection: { xs: "column", sm: "row" },
-          flexWrap: "nowrap",
-          alignItems: { xs: "stretch", sm: "center" },
-          justifyContent: showImageOnly ? "center" : undefined,
           borderRadius: 2,
-          overflow: "visible",
+          overflow: "hidden",
           borderColor: "divider",
-          width: { xs: "100%", sm: "fit-content" },
+          width: "100%",
           maxWidth: "100%",
           minWidth: 0,
           boxSizing: "border-box",
         }}
       >
-        {itemTextStack}
-        {imageColumn}
+        {singleBody}
       </Paper>
     </ButtonBase>
   );
@@ -8230,6 +8246,7 @@ function ItemBlock({
                 flex: { xl: "0 0 auto" },
                 width: { xs: "100%", xl: "fit-content" },
                 maxWidth: "100%",
+                minWidth: 0,
                 alignSelf: { xl: "flex-start" },
                 boxSizing: "border-box",
                 pl: { xl: 3 },
