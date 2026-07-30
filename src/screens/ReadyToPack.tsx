@@ -1017,7 +1017,7 @@ const INSTRUCTIONS_CARD_WIDTH = 414;
 /**
  * The “Packing Instructions” title band: its own row at the top of the card, always
  * closed by a full-width divider, whether there is one instruction or several. When
- * there are several, the read-all-before-packing alert sits inline beside the title.
+ * there are several, a “Multiple instructions” warning sits at the right of that row.
  */
 function InstructionsCardHeader({
   count,
@@ -1058,20 +1058,19 @@ function InstructionsCardHeader({
           direction="row"
           spacing={0.5}
           alignItems="center"
-          sx={{ minWidth: 0, flex: "1 1 auto" }}
+          sx={{ flexShrink: 0, ml: "auto" }}
         >
           <WarningAmberRoundedIcon sx={{ fontSize: 18, color: "#ed6c02", flexShrink: 0 }} />
           <Typography
             variant="caption"
             sx={{
-              minWidth: 0,
               fontWeight: 700,
               letterSpacing: "0.15px",
               color: "#663c00",
-              lineHeight: 1.4,
+              whiteSpace: "nowrap",
             }}
           >
-            Multiple instructions — read all before packing
+            Multiple instructions
           </Typography>
         </Stack>
       ) : null}
