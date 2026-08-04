@@ -28,6 +28,7 @@ import {
   Divider,
   FormControl,
   FormControlLabel,
+  FormHelperText,
   IconButton,
   InputAdornment,
   InputBase,
@@ -93,6 +94,11 @@ import SyncIcon from "@mui/icons-material/Sync";
 import PlaceOutlinedIcon from "@mui/icons-material/PlaceOutlined";
 import PrecisionManufacturingIcon from "@mui/icons-material/PrecisionManufacturing";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import AddIcon from "@mui/icons-material/Add";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
+import RestartAltIcon from "@mui/icons-material/RestartAlt";
+import QrCode2Icon from "@mui/icons-material/QrCode2";
 
 import { LinkedShipmentTabs, type LinkedShipmentTabItem } from "../components/LinkedShipmentTabs";
 import { loadNewSplitShipmentIdFromApi } from "../api/loadNewSplitShipmentId";
@@ -101,6 +107,35 @@ import {
   isPackingStatusBlockingActions,
   type PackingOrderUiStatus,
 } from "../packing/statusChipConfig";
+import {
+  CURRENT_PACKING_FACILITY_ID,
+  RECOVERY_COUNTRY_OPTIONS,
+  RECOVERY_MATERIAL_OPTIONS,
+  findCountryName,
+  formatCarrierServiceDisplay,
+  getHsCodeForMaterial,
+  getScenarioBarcode,
+} from "../recovery/recoveryFixtures";
+import type {
+  CarrierServiceOption,
+  CountryAddressRules,
+  FacilityConfig,
+  ManualShipmentDraft,
+  ManualShipmentItemDraft,
+  RecoveryScenario,
+  TgSupplierItemRecord,
+} from "../recovery/recoveryTypes";
+import {
+  lookupTgSupplierItemFromApi,
+  markItemSentInTgSupplierFromApi,
+} from "../services/tgSupplier";
+import {
+  ShipmentGenerationError,
+  createManualShipmentFromApi,
+  triggerShipmentGenerationFromApi,
+} from "../services/shipmentGeneration";
+import { loadCountryAddressRulesFromApi } from "../services/localization";
+import { loadCarrierServicesFromApi, loadFacilityConfigFromApi } from "../services/logistics";
 import oakAndLunaLogo from "../assets/oakandluna.svg";
 import logoMYKA from "../assets/logos/Logo=MYKA.svg";
 import logoLAL from "../assets/logos/Logo=LAL.svg";
@@ -329,6 +364,12 @@ const PROTOTYPE_SEARCH_KEYWORDS = [
   "packed",
   "shipped",
   "cancelled",
+  "noshipments",
+  "recovery",
+  "recovery-otherfacility",
+  "recovery-fail",
+  "recovery-notgsupplier",
+  "production",
 ] as const;
 
 /** Prototype: full ready-to-pack UI — search `pack` or Next Order. */
@@ -376,6 +417,27 @@ const PROTOTYPE_SIMILAR_ORDERS_ORDER_ID = "similar";
 const PROTOTYPE_SIMILAR_MULTIPLE_ORDERS_ORDER_ID = "similar-multiple";
 /** Prototype: linked split shipments — search `split` or finish Split Shipment dialog; tabs for original + new. */
 const PROTOTYPE_SPLIT_ORDER_ID = "split";
+/** Prototype: "No shipments found" state — search `noshipments` (or an all-zeros ID). */
+const PROTOTYPE_NO_SHIPMENTS_SEARCH = "noshipments";
+/**
+ * Prototype: shipment recovery from the not-found state. Each keyword lands on
+ * "No shipments found" and auto-opens the recovery confirm dialog with one outcome:
+ * `recovery` succeeds, `recovery-otherfacility` is blocked by facility, `recovery-fail`
+ * fails generation (unlocking manual creation), `recovery-notgsupplier` has no record.
+ */
+const PROTOTYPE_RECOVERY_SEARCH_SCENARIOS: Readonly<Record<string, RecoveryScenario>> = {
+  recovery: "happyPath",
+  "recovery-otherfacility": "otherFacility",
+  "recovery-fail": "generationFailed",
+  "recovery-notgsupplier": "noTgSupplierRecord",
+};
+/** Prototype: shipment whose line item is still in production — search `production`. */
+const PROTOTYPE_IN_PRODUCTION_ORDER_ID = "production";
+/**
+ * Prototype shipment-recovery permission gate. Always granted for the demo; flip to
+ * `false` to preview the unpermitted state (standard not-found message, no "Item sent").
+ */
+const HAS_SHIPMENT_RECOVERY_PERMISSION = true;
 
 type SimilarOrderTab = {
   key: string;
@@ -605,6 +667,15 @@ function isPrototypeInstructionShipmentLevelOrderId(id: string | null): boolean 
   return id !== null && id.toLowerCase() === PROTOTYPE_INSTRUCTION_SHIPMENT_LEVEL_ORDER_ID;
 }
 
+function isPrototypeInProductionOrderId(id: string | null): boolean {
+  return id !== null && id.toLowerCase() === PROTOTYPE_IN_PRODUCTION_ORDER_ID;
+}
+
+/** Maps a recovery demo keyword to the outcome it simulates; null for any other query. */
+function resolveRecoveryScenario(query: string): RecoveryScenario | null {
+  return PROTOTYPE_RECOVERY_SEARCH_SCENARIOS[query.trim().toLowerCase()] ?? null;
+}
+
 function getNextPrototypeCycleOrderId(current: string | null): string {
   const order = PROTOTYPE_NEXT_ORDER_CYCLE;
   if (!current) return order[0];
@@ -655,6 +726,7 @@ function normalizeOrderIdForLoad(raw: string): string {
   if (lower === PROTOTYPE_SIMILAR_ORDERS_ORDER_ID) return PROTOTYPE_SIMILAR_ORDERS_ORDER_ID;
   if (lower === PROTOTYPE_SIMILAR_MULTIPLE_ORDERS_ORDER_ID) return PROTOTYPE_SIMILAR_MULTIPLE_ORDERS_ORDER_ID;
   if (lower === PROTOTYPE_SPLIT_ORDER_ID) return PROTOTYPE_SPLIT_ORDER_ID;
+  if (lower === PROTOTYPE_IN_PRODUCTION_ORDER_ID) return PROTOTYPE_IN_PRODUCTION_ORDER_ID;
   return t;
 }
 
@@ -683,8 +755,10 @@ function prototypeSplitOriginalShipmentIdForTabs(currentShipmentId: string): str
   return "SH-12345";
 }
 
-function isZeroOnlyShipmentQuery(id: string): boolean {
-  return id.length > 0 && /^0+$/.test(id);
+function isNoShipmentsQuery(id: string): boolean {
+  if (!id.length) return false;
+  if (resolveRecoveryScenario(id) !== null) return true;
+  return /^0+$/.test(id) || id.toLowerCase() === PROTOTYPE_NO_SHIPMENTS_SEARCH;
 }
 
 function EmptyStateHero() {
@@ -744,7 +818,14 @@ function EmptyStateHero() {
   );
 }
 
-function NoShipmentsFoundHero({ shippingId }: { shippingId: string }) {
+function NoShipmentsFoundHero({
+  shippingId,
+  action,
+}: {
+  shippingId: string;
+  /** Recovery entry point, rendered under the subtext (tightens the icon/text gap when present). */
+  action?: ReactNode;
+}) {
   return (
     <Box
       sx={{
@@ -766,7 +847,7 @@ function NoShipmentsFoundHero({ shippingId }: { shippingId: string }) {
           height: 400,
           borderRadius: "50%",
           bgcolor: "background.paper",
-          gap: 4.25,
+          gap: action ? 3 : 4.25,
           textAlign: "center",
           px: 3,
           boxSizing: "border-box",
@@ -782,7 +863,7 @@ function NoShipmentsFoundHero({ shippingId }: { shippingId: string }) {
               fontWeight: 400,
             }}
           >
-            No Shipments Found
+            No shipments found
           </Typography>
           <Typography
             sx={{
@@ -793,9 +874,10 @@ function NoShipmentsFoundHero({ shippingId }: { shippingId: string }) {
               wordBreak: "break-all",
             }}
           >
-            For shipping ID #{shippingId}
+            for shipping ID #{shippingId}
           </Typography>
         </Stack>
+        {action}
       </Stack>
     </Box>
   );
@@ -1472,6 +1554,23 @@ const PROTOTYPE_REMOTE_FACILITY_LOCATION_BY_ITEM_ID: Record<string, string> = {
 /** Hungary factory demo (header toggle): line 2 appears under “other facilities” without receive checkbox. */
 const HUNGARY_DEMO_OTHER_FACILITY_LINE_IDS: readonly string[] = ["pack-item-2"];
 
+/**
+ * Prototype `production` search: line items still in production. Item 1 is in this
+ * facility so it gets the "Item Sent" release control; item 2 is elsewhere, proving
+ * the facility condition hides the control.
+ */
+const PROTOTYPE_IN_PRODUCTION_ITEM_IDS: readonly string[] = ["pack-item-1", "pack-item-2"];
+
+/** Which facility each in-production item sits in; only current-facility items are releasable. */
+const PROTOTYPE_IN_PRODUCTION_FACILITY_BY_ITEM_ID: Record<string, string> = {
+  "pack-item-1": "IL-KG",
+  "pack-item-2": "IL-NZ",
+};
+
+function getInProductionItemFacilityId(itemId: string): string {
+  return PROTOTYPE_IN_PRODUCTION_FACILITY_BY_ITEM_ID[itemId] ?? "";
+}
+
 /** Assign-storage flow — how a line item is stored (a suggested cell, or a scanned container). */
 type StorageAssignment =
   | { kind: "cell"; cell: number }
@@ -1937,10 +2036,21 @@ function UpdateAddressDialog({
 type HistoryLogEntry = {
   id: string;
   at: string;
+  /** Doubles as the actor: a system name ("WMS") or a person ("David packer"). */
   source: string;
   /** Omitted for compact shipment timeline rows (title + date only). */
   detail?: string;
 };
+
+/** `at` is a pre-formatted display string, so new entries must match the fixture format. */
+function formatHistoryTimestamp(date: Date): string {
+  const time = date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()} ${time}`;
+}
 
 const ORDER_HISTORY_LOG: HistoryLogEntry[] = [
   {
@@ -2259,10 +2369,13 @@ function ShipmentHistoryLogDialog({
   open,
   onClose,
   shipmentId,
+  entries,
 }: {
   open: boolean;
   onClose: () => void;
   shipmentId: string;
+  /** Live log — recovery actions are appended at runtime, so this is state, not the fixture. */
+  entries: HistoryLogEntry[];
 }) {
   return (
     <HistoryLogDialog
@@ -2274,7 +2387,7 @@ function ShipmentHistoryLogDialog({
           Shipment #{shipmentId}
         </Typography>
       }
-      entries={SHIPMENT_HISTORY_LOG}
+      entries={entries}
       captionUppercase
     />
   );
@@ -4252,6 +4365,1323 @@ function CarrierShippingRouteDialog({
   );
 }
 
+/* ---------------------------------------------------------------------------
+ * Shipment recovery
+ * Confirm → hub (check details / mark as sent) → manual creation on failure.
+ * ------------------------------------------------------------------------- */
+
+/** Circle badge behind the recovery glyph; matches the pending-modal treatment. */
+const RECOVERY_ICON_CIRCLE_BG = "#FEF3E7";
+const RECOVERY_DETAIL_BOX_BG = "#F5F5F5";
+
+/** Inline alert styling, matching the Status card alerts. */
+const RECOVERY_ALERT_WARNING_SX = {
+  alignItems: "flex-start",
+  py: 1.5,
+  px: 2,
+  borderRadius: 1,
+  border: "none",
+  boxShadow: "none",
+  bgcolor: orange[50],
+  color: "#663C00",
+  "& .MuiAlert-icon": { color: "warning.main" },
+  "& .MuiAlert-message": { width: "100%", pt: 0.125, color: "#663C00" },
+} as const;
+
+const RECOVERY_ALERT_ERROR_SX = {
+  alignItems: "flex-start",
+  py: 1.5,
+  px: 2,
+  borderRadius: 1,
+  border: "none",
+  boxShadow: "none",
+  bgcolor: red[50],
+  color: "#5F2120",
+  "& .MuiAlert-icon": { color: "error.main" },
+  "& .MuiAlert-message": { width: "100%", pt: 0.125, color: "#5F2120" },
+} as const;
+
+const RECOVERY_ALERT_TITLE_WARNING_SX = {
+  fontWeight: 600,
+  fontSize: 16,
+  color: "#663C00",
+  mb: 0.5,
+  letterSpacing: "0.15px",
+} as const;
+
+const RECOVERY_ALERT_TITLE_ERROR_SX = {
+  fontWeight: 600,
+  fontSize: 16,
+  color: "#5F2120",
+  mb: 0.5,
+  letterSpacing: "0.15px",
+} as const;
+
+/** Nested action/section card inside the recovery dialogs. */
+const RECOVERY_CARD_SX = {
+  p: 2,
+  borderRadius: 1,
+  borderColor: "divider",
+  bgcolor: "background.paper",
+} as const;
+
+const RECOVERY_SECTION_TITLE_SX = {
+  fontWeight: 600,
+  color: "text.primary",
+  letterSpacing: "0.15px",
+} as const;
+
+const RECOVERY_FIELD_LABEL_SX = {
+  width: 156,
+  flexShrink: 0,
+  fontWeight: 600,
+  color: "text.primary",
+  pt: 1.25,
+} as const;
+
+const RECOVERY_FIELD_SX = { "& .MuiOutlinedInput-root": { borderRadius: 1 } } as const;
+
+const RECOVERY_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const RECOVERY_DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
+const RECOVERY_INTEGER_PATTERN = /^\d+$/;
+
+/** Live ZIP check against the pattern the localization service returned for the country. */
+function isRecoveryZipValid(zip: string, rules: CountryAddressRules | null): boolean {
+  const trimmed = zip.trim();
+  if (!rules || !trimmed) return false;
+  try {
+    return new RegExp(rules.zipPattern).test(trimmed);
+  } catch {
+    // A malformed pattern from the service must not block the packer.
+    return true;
+  }
+}
+
+/**
+ * Validated text row for the recovery form.
+ *
+ * This screen has no field-level validation precedent (no `error`/`helperText`
+ * anywhere), so recovery standardises on this one wrapper rather than scattering
+ * per-field markup. An error shows once the field is touched or has content.
+ */
+function RecoveryFormField({
+  label,
+  value,
+  onChange,
+  valid,
+  touched = false,
+  errorText,
+  helperText,
+  disabled = false,
+  placeholder,
+  optional = false,
+  inputMode,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  valid: boolean;
+  /** Forces the error state even while empty; by default only filled-but-invalid shows red. */
+  touched?: boolean;
+  errorText?: string;
+  helperText?: string;
+  disabled?: boolean;
+  placeholder?: string;
+  optional?: boolean;
+  inputMode?: "text" | "decimal" | "numeric" | "email" | "tel";
+}) {
+  const showError = !disabled && !valid && (touched || value.trim().length > 0);
+  return (
+    <Stack direction="row" alignItems="flex-start" spacing={2} sx={{ width: "100%" }}>
+      <Typography sx={RECOVERY_FIELD_LABEL_SX}>
+        {label}
+        {optional ? (
+          <Box component="span" sx={{ fontWeight: 400, color: "text.secondary" }}>
+            {" "}
+            (optional)
+          </Box>
+        ) : null}
+      </Typography>
+      <TextField
+        fullWidth
+        size="small"
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        error={showError}
+        helperText={showError ? errorText : helperText}
+        inputProps={inputMode ? { inputMode } : undefined}
+        sx={RECOVERY_FIELD_SX}
+      />
+    </Stack>
+  );
+}
+
+/** Select row matching `RecoveryFormField`'s label column. */
+function RecoverySelectField({
+  label,
+  value,
+  onChange,
+  options,
+  disabled = false,
+  placeholder = "Select",
+  helperText,
+  showError = false,
+  errorText,
+  endAdornment,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  options: readonly { value: string; label: string }[];
+  disabled?: boolean;
+  placeholder?: string;
+  helperText?: string;
+  showError?: boolean;
+  errorText?: string;
+  endAdornment?: ReactNode;
+}) {
+  return (
+    <Stack direction="row" alignItems="flex-start" spacing={2} sx={{ width: "100%" }}>
+      <Typography sx={RECOVERY_FIELD_LABEL_SX}>{label}</Typography>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ flex: 1, minWidth: 0 }}>
+        <FormControl fullWidth size="small" disabled={disabled} error={showError} sx={RECOVERY_FIELD_SX}>
+          <Select
+            value={value}
+            displayEmpty
+            onChange={(e: SelectChangeEvent<string>) => onChange(e.target.value)}
+            renderValue={(v) =>
+              v === "" ? (
+                <Typography component="span" variant="body1" color="text.disabled">
+                  {placeholder}
+                </Typography>
+              ) : (
+                (options.find((o) => o.value === v)?.label ?? v)
+              )
+            }
+            MenuProps={{ PaperProps: { sx: { maxHeight: 320 } } }}
+          >
+            <MenuItem value="" disabled>
+              {placeholder}
+            </MenuItem>
+            {options.map((o) => (
+              <MenuItem key={o.value} value={o.value}>
+                {o.label}
+              </MenuItem>
+            ))}
+          </Select>
+          {showError && errorText ? <FormHelperText>{errorText}</FormHelperText> : null}
+          {!showError && helperText ? <FormHelperText>{helperText}</FormHelperText> : null}
+        </FormControl>
+        {endAdornment}
+      </Stack>
+    </Stack>
+  );
+}
+
+function ShipmentRecoveryConfirmDialog({
+  open,
+  barcode,
+  onCancel,
+  onStart,
+}: {
+  open: boolean;
+  barcode: string;
+  onCancel: () => void;
+  onStart: () => void;
+}) {
+  return (
+    <Dialog
+      open={open}
+      onClose={(_, reason) => {
+        if (reason === "backdropClick" || reason === "escapeKeyDown") onCancel();
+      }}
+      maxWidth={false}
+      scroll="paper"
+      slotProps={{ backdrop: { sx: { bgcolor: "rgba(0,0,0,0.5)" } } }}
+      PaperProps={{
+        component: Paper,
+        elevation: 0,
+        sx: {
+          width: "100%",
+          maxWidth: 540,
+          minHeight: 420,
+          maxHeight: "calc(100% - 64px)",
+          borderRadius: 1,
+          overflow: "hidden",
+          ...elevationSx,
+          display: "flex",
+          flexDirection: "column",
+        },
+      }}
+    >
+      <StandardDialogTitle onClose={onCancel}>Start shipment recovery?</StandardDialogTitle>
+      <Divider sx={{ flexShrink: 0 }} />
+      <DialogContent
+        sx={{
+          px: 3,
+          pt: 3,
+          pb: 3,
+          flex: "1 1 auto",
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Stack
+          alignItems="center"
+          spacing={2.5}
+          sx={{ textAlign: "center", width: "100%", maxWidth: 440, mx: "auto" }}
+        >
+          <Box
+            aria-hidden
+            sx={{
+              width: 64,
+              height: 64,
+              borderRadius: "50%",
+              bgcolor: RECOVERY_ICON_CIRCLE_BG,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <RestartAltIcon sx={{ fontSize: 36, color: "warning.main" }} />
+          </Box>
+          <Typography
+            variant="body1"
+            sx={{
+              color: "text.primary",
+              fontSize: 16,
+              fontWeight: 700,
+              letterSpacing: "0.15px",
+              lineHeight: 1.5,
+            }}
+          >
+            No shipment exists for this item yet.
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{
+              color: "text.secondary",
+              fontSize: 14,
+              letterSpacing: "0.15px",
+              lineHeight: 1.5,
+            }}
+          >
+            Recovery checks the item against TG Supplier and retries shipment generation.
+          </Typography>
+          <Box
+            sx={{
+              width: "100%",
+              py: 1.5,
+              px: 2,
+              borderRadius: 1,
+              bgcolor: RECOVERY_DETAIL_BOX_BG,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 1,
+            }}
+          >
+            <QrCode2Icon sx={{ fontSize: 22, color: "text.secondary", flexShrink: 0 }} />
+            <Typography
+              variant="body2"
+              sx={{ color: "text.primary", lineHeight: 1.5, letterSpacing: "0.15px", wordBreak: "break-all" }}
+            >
+              <Box component="span" fontWeight={700}>
+                Scanned barcode:
+              </Box>{" "}
+              <Box component="span" fontWeight={400}>
+                {barcode}
+              </Box>
+            </Typography>
+          </Box>
+          <Alert
+            severity="warning"
+            variant="standard"
+            icon={<WarningAmberRoundedIcon />}
+            sx={{ ...RECOVERY_ALERT_WARNING_SX, width: "100%", textAlign: "left" }}
+          >
+            <Typography
+              variant="body2"
+              sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#663C00", fontWeight: 500 }}
+            >
+              Every recovery action is recorded in the shipment log and attributed to you.
+            </Typography>
+          </Alert>
+        </Stack>
+      </DialogContent>
+      <DialogActions
+        sx={{
+          px: 3,
+          py: 2,
+          justifyContent: "space-between",
+          flexShrink: 0,
+          borderTop: 1,
+          borderColor: "divider",
+          gap: 2,
+        }}
+      >
+        <Button variant="outlined" onClick={onCancel} sx={{ ...DIALOG_CANCEL_BUTTON_SX, py: 1, px: 2.5 }}>
+          Cancel
+        </Button>
+        <Button variant="contained" color="primary" onClick={onStart} sx={{ py: 1, px: 2.5 }}>
+          Start recovery
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+type RecoveryDetailsPhase = "idle" | "loading" | "loaded" | "noRecord";
+type RecoveryMarkSentPhase = "idle" | "loading" | "facilityMismatch" | "noRecord" | "failed";
+
+function ShipmentRecoveryHubDialog({
+  open,
+  barcode,
+  scenario,
+  actorName,
+  currentFacilityId,
+  onClose,
+  onLog,
+  onRecovered,
+  onCreateManually,
+}: {
+  open: boolean;
+  barcode: string;
+  scenario: RecoveryScenario;
+  actorName: string;
+  currentFacilityId: string;
+  onClose: () => void;
+  onLog: (detail: string) => void;
+  onRecovered: (orderId: string, shipmentId: string) => void;
+  onCreateManually: (record: TgSupplierItemRecord | null) => void;
+}) {
+  const [detailsPhase, setDetailsPhase] = useState<RecoveryDetailsPhase>("idle");
+  const [record, setRecord] = useState<TgSupplierItemRecord | null>(null);
+  const [markSentPhase, setMarkSentPhase] = useState<RecoveryMarkSentPhase>("idle");
+  const [mismatchFacilityName, setMismatchFacilityName] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setDetailsPhase("idle");
+    setRecord(null);
+    setMarkSentPhase("idle");
+    setMismatchFacilityName("");
+  }, [open, barcode]);
+
+  const handleCheckDetails = async () => {
+    setDetailsPhase("loading");
+    try {
+      const found = await lookupTgSupplierItemFromApi(barcode, scenario);
+      setRecord(found);
+      setDetailsPhase(found ? "loaded" : "noRecord");
+      onLog(
+        found
+          ? `Recovery: item details checked for barcode ${barcode} (${found.itemName}, order ${found.orderId}).`
+          : `Recovery: item details check found no TG Supplier record for barcode ${barcode}.`,
+      );
+    } catch (e) {
+      console.error(e);
+      setDetailsPhase("noRecord");
+      onLog(`Recovery: item details check failed for barcode ${barcode}.`);
+    }
+  };
+
+  const handleMarkAsSent = async () => {
+    setMarkSentPhase("loading");
+    try {
+      // Resolve the supplier facility before touching TG Supplier.
+      const resolved = record ?? (await lookupTgSupplierItemFromApi(barcode, scenario));
+      if (!resolved) {
+        setRecord(null);
+        setMarkSentPhase("noRecord");
+        onLog(`Recovery: mark-as-sent aborted — no TG Supplier record for barcode ${barcode}.`);
+        return;
+      }
+      setRecord(resolved);
+
+      if (resolved.supplierFacilityId !== currentFacilityId) {
+        setMismatchFacilityName(resolved.supplierFacilityName);
+        setMarkSentPhase("facilityMismatch");
+        onLog(
+          `Recovery: mark-as-sent blocked — item ${resolved.itemName} belongs to ${resolved.supplierFacilityName}.`,
+        );
+        return;
+      }
+
+      await markItemSentInTgSupplierFromApi(barcode, actorName);
+      onLog(`Recovery: item ${resolved.itemName} marked as sent in TG Supplier.`);
+
+      const { shipmentId } = await triggerShipmentGenerationFromApi(resolved.orderId, {
+        simulateFailure: scenario === "generationFailed",
+      });
+      onLog(`Recovery: shipment generation succeeded for order ${resolved.orderId} — ${shipmentId}.`);
+      onRecovered(resolved.orderId, shipmentId);
+    } catch (e) {
+      const isGenerationFailure = e instanceof ShipmentGenerationError;
+      if (!isGenerationFailure) console.error(e);
+      setMarkSentPhase("failed");
+      onLog(
+        `Recovery: shipment generation failed${record ? ` for order ${record.orderId}` : ""} — manual creation required.`,
+      );
+    }
+  };
+
+  const detailsLoading = detailsPhase === "loading";
+  const markSentLoading = markSentPhase === "loading";
+  const busy = detailsLoading || markSentLoading;
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth={false}
+      fullWidth
+      scroll="paper"
+      slotProps={{ backdrop: { sx: { bgcolor: "rgba(0,0,0,0.5)" } } }}
+      PaperProps={{
+        sx: {
+          width: "100%",
+          maxWidth: 700,
+          minHeight: 500,
+          maxHeight: "calc(100% - 64px)",
+          borderRadius: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        },
+      }}
+    >
+      <StandardDialogTitle
+        onClose={onClose}
+        subtitle={
+          <Chip
+            icon={<QrCode2Icon sx={{ fontSize: "18px !important", color: "text.primary" }} />}
+            label={barcode}
+            size="small"
+            sx={{
+              height: 26,
+              fontWeight: 600,
+              fontSize: 13,
+              letterSpacing: "0.15px",
+              color: "text.primary",
+              bgcolor: "grey.200",
+              "& .MuiChip-label": { px: 0.75 },
+            }}
+          />
+        }
+      >
+        Shipment recovery
+      </StandardDialogTitle>
+      <Divider sx={{ flexShrink: 0 }} />
+      <DialogContent
+        sx={{
+          px: 3,
+          pt: 3,
+          pb: 2,
+          flex: "1 1 auto",
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "auto",
+        }}
+      >
+        <Stack spacing={2.5}>
+          {/* Card 1 — TG Supplier lookup */}
+          <Paper variant="outlined" elevation={0} sx={RECOVERY_CARD_SX}>
+            <Stack spacing={1.5}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
+                    Check item details
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ letterSpacing: "0.15px" }}>
+                    Look the scanned barcode up in TG Supplier.
+                  </Typography>
+                </Box>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  disabled={busy}
+                  onClick={() => void handleCheckDetails()}
+                  startIcon={
+                    detailsLoading ? (
+                      <CircularProgress size={18} color="inherit" />
+                    ) : (
+                      <FactCheckOutlinedIcon />
+                    )
+                  }
+                  sx={{ flexShrink: 0, py: 1, px: 2.25 }}
+                >
+                  {detailsLoading ? "Checking…" : "Check item details"}
+                </Button>
+              </Stack>
+
+              {detailsPhase === "loaded" && record ? (
+                <Box
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" },
+                    gap: 2,
+                    p: 2,
+                    borderRadius: 1,
+                    bgcolor: RECOVERY_DETAIL_BOX_BG,
+                  }}
+                >
+                  <FieldBlock label="Item">{record.itemName}</FieldBlock>
+                  <FieldBlock label="Order ID">{record.orderId}</FieldBlock>
+                  <FieldBlock label="Supplier">{record.supplier}</FieldBlock>
+                </Box>
+              ) : null}
+
+              {detailsPhase === "noRecord" ? (
+                <Alert
+                  severity="error"
+                  variant="standard"
+                  icon={<CancelOutlinedIcon />}
+                  sx={RECOVERY_ALERT_ERROR_SX}
+                >
+                  <AlertTitle sx={RECOVERY_ALERT_TITLE_ERROR_SX}>No TG Supplier record</AlertTitle>
+                  <Typography
+                    variant="body2"
+                    sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#5F2120", fontWeight: 500 }}
+                  >
+                    This is not a TG Supplier item label, so shipment recovery is not applicable. Check
+                    that you scanned the item label and not the packaging or container barcode.
+                  </Typography>
+                </Alert>
+              ) : null}
+            </Stack>
+          </Paper>
+
+          {/* Card 2 — mark as sent + generation retry */}
+          <Paper variant="outlined" elevation={0} sx={RECOVERY_CARD_SX}>
+            <Stack spacing={1.5}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
+                    Mark as sent
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ letterSpacing: "0.15px" }}>
+                    Updates TG Supplier and retries shipment generation.
+                  </Typography>
+                </Box>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  disabled={busy || detailsPhase === "noRecord"}
+                  onClick={() => void handleMarkAsSent()}
+                  startIcon={
+                    markSentLoading ? (
+                      <CircularProgress size={18} color="inherit" sx={{ color: "#fff !important" }} />
+                    ) : (
+                      <CheckIcon />
+                    )
+                  }
+                  sx={{ flexShrink: 0, py: 1, px: 2.25 }}
+                >
+                  {markSentLoading ? "Working…" : "Mark as sent"}
+                </Button>
+              </Stack>
+
+              {markSentPhase === "facilityMismatch" ? (
+                <Alert
+                  severity="warning"
+                  variant="standard"
+                  icon={<ErrorOutlineIcon />}
+                  sx={RECOVERY_ALERT_WARNING_SX}
+                >
+                  <AlertTitle sx={RECOVERY_ALERT_TITLE_WARNING_SX}>Item is at another facility</AlertTitle>
+                  <Typography
+                    variant="body2"
+                    sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#663C00", fontWeight: 500 }}
+                  >
+                    This item belongs to another facility and must be transferred to be available for
+                    shipping.
+                    {mismatchFacilityName ? ` Currently held at ${mismatchFacilityName}.` : ""}
+                  </Typography>
+                </Alert>
+              ) : null}
+
+              {markSentPhase === "noRecord" ? (
+                <Alert
+                  severity="error"
+                  variant="standard"
+                  icon={<CancelOutlinedIcon />}
+                  sx={RECOVERY_ALERT_ERROR_SX}
+                >
+                  <AlertTitle sx={RECOVERY_ALERT_TITLE_ERROR_SX}>No TG Supplier record</AlertTitle>
+                  <Typography
+                    variant="body2"
+                    sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#5F2120", fontWeight: 500 }}
+                  >
+                    This is not a TG Supplier item label, so recovery is not applicable.
+                  </Typography>
+                </Alert>
+              ) : null}
+
+              {markSentPhase === "failed" ? (
+                <Alert
+                  severity="error"
+                  variant="standard"
+                  icon={<CancelOutlinedIcon />}
+                  sx={RECOVERY_ALERT_ERROR_SX}
+                >
+                  <AlertTitle sx={RECOVERY_ALERT_TITLE_ERROR_SX}>
+                    Shipment generation failed
+                  </AlertTitle>
+                  <Stack spacing={1.5} alignItems="flex-start">
+                    <Typography
+                      variant="body2"
+                      sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#5F2120", fontWeight: 500 }}
+                    >
+                      The item was marked as sent, but no shipment was generated. Create the shipment
+                      manually to keep packing.
+                    </Typography>
+                    <Button
+                      variant="contained"
+                      color="warning"
+                      onClick={() => onCreateManually(record)}
+                      sx={{
+                        py: 0.75,
+                        px: 2.25,
+                        "&:not(.Mui-disabled)": {
+                          bgcolor: "#ed6c02",
+                          color: "#fff",
+                          "&:hover": { bgcolor: "#e65100" },
+                        },
+                      }}
+                    >
+                      Create shipment manually
+                    </Button>
+                  </Stack>
+                </Alert>
+              ) : null}
+            </Stack>
+          </Paper>
+        </Stack>
+      </DialogContent>
+      <Divider sx={{ flexShrink: 0 }} />
+      <DialogActions sx={{ px: 3, py: 2, justifyContent: "flex-end", flexShrink: 0 }}>
+        <Button variant="contained" color="primary" onClick={onClose} sx={{ py: 1, px: 2.75 }}>
+          Close
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function makeBlankManualItem(key: string): ManualShipmentItemDraft {
+  return { key, itemName: "", material: "", hsCode: "", weight: "", declaredValue: "", quantity: "1" };
+}
+
+function isManualItemValid(item: ManualShipmentItemDraft): boolean {
+  return (
+    item.itemName.trim().length > 0 &&
+    item.material.trim().length > 0 &&
+    item.hsCode.trim().length > 0 &&
+    RECOVERY_DECIMAL_PATTERN.test(item.weight.trim()) &&
+    RECOVERY_DECIMAL_PATTERN.test(item.declaredValue.trim()) &&
+    RECOVERY_INTEGER_PATTERN.test(item.quantity.trim()) &&
+    Number(item.quantity) > 0
+  );
+}
+
+/**
+ * Last resort when shipment generation fails: hand-enter the shipment.
+ * Reachable only from the generation-failure state in the recovery hub.
+ */
+function ManualShipmentCreationDialog({
+  open,
+  prefillOrderId,
+  facilityId,
+  onClose,
+  onLog,
+  onCreated,
+}: {
+  open: boolean;
+  prefillOrderId: string;
+  facilityId: string;
+  onClose: () => void;
+  onLog: (detail: string) => void;
+  onCreated: (shipmentId: string, orderId: string) => void;
+}) {
+  const [orderId, setOrderId] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [countryCode, setCountryCode] = useState("");
+  const [street1, setStreet1] = useState("");
+  const [street2, setStreet2] = useState("");
+  const [city, setCity] = useState("");
+  const [stateProvince, setStateProvince] = useState("");
+  const [zipCode, setZipCode] = useState("");
+  const [items, setItems] = useState<ManualShipmentItemDraft[]>([]);
+  const [carrierServiceId, setCarrierServiceId] = useState("");
+  const [declaredShippingCost, setDeclaredShippingCost] = useState("");
+
+  const [rules, setRules] = useState<CountryAddressRules | null>(null);
+  const [services, setServices] = useState<CarrierServiceOption[]>([]);
+  const [countryLoading, setCountryLoading] = useState(false);
+  const [facility, setFacility] = useState<FacilityConfig | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const itemKeyRef = useRef(0);
+
+  useEffect(() => {
+    if (!open) return;
+    itemKeyRef.current = 1;
+    setOrderId(prefillOrderId);
+    setCustomerName("");
+    setCustomerEmail("");
+    setCustomerPhone("");
+    setCountryCode("");
+    setStreet1("");
+    setStreet2("");
+    setCity("");
+    setStateProvince("");
+    setZipCode("");
+    setItems([makeBlankManualItem("manual-item-1")]);
+    setCarrierServiceId("");
+    setDeclaredShippingCost("");
+    setRules(null);
+    setServices([]);
+    setSubmitError(null);
+    setSubmitting(false);
+  }, [open, prefillOrderId]);
+
+  /** Facility details are read-only config, loaded once per open. */
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const config = await loadFacilityConfigFromApi(facilityId);
+        if (!cancelled) setFacility(config);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, facilityId]);
+
+  /** Country drives both the address rules and the carrier list. */
+  useEffect(() => {
+    if (!open) return;
+    if (!countryCode) {
+      setRules(null);
+      setServices([]);
+      return;
+    }
+    let cancelled = false;
+    setCountryLoading(true);
+    void (async () => {
+      try {
+        const [nextRules, nextServices] = await Promise.all([
+          loadCountryAddressRulesFromApi(countryCode),
+          loadCarrierServicesFromApi(facilityId, countryCode),
+        ]);
+        if (cancelled) return;
+        setRules(nextRules);
+        setServices(nextServices);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) {
+          setRules(null);
+          setServices([]);
+        }
+      } finally {
+        if (!cancelled) setCountryLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, countryCode, facilityId]);
+
+  const handleCountryChange = (next: string) => {
+    setCountryCode(next);
+    // Rules and available carriers both change with the country.
+    setStateProvince("");
+    setZipCode("");
+    setCarrierServiceId("");
+  };
+
+  const patchItem = (key: string, patch: Partial<ManualShipmentItemDraft>) => {
+    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
+  };
+
+  const handleMaterialChange = (key: string, material: string) => {
+    // HS code auto-populates from the material and stays editable.
+    patchItem(key, { material, hsCode: getHsCodeForMaterial(material) });
+  };
+
+  const handleAddItem = () => {
+    itemKeyRef.current += 1;
+    setItems((prev) => [...prev, makeBlankManualItem(`manual-item-${itemKeyRef.current}`)]);
+  };
+
+  const handleRemoveItem = (key: string) => {
+    setItems((prev) => (prev.length <= 1 ? prev : prev.filter((it) => it.key !== key)));
+  };
+
+  const addressEnabled = Boolean(rules) && !countryLoading;
+  const stateRequired = Boolean(rules?.stateRequired);
+  const stateOptions = rules?.stateOptions ?? [];
+
+  const orderIdValid = orderId.trim().length > 0;
+  const nameValid = customerName.trim().length > 0;
+  const emailValid = RECOVERY_EMAIL_PATTERN.test(customerEmail.trim());
+  const phoneValid = customerPhone.trim().length > 0;
+  const street1Valid = street1.trim().length > 0;
+  const cityValid = city.trim().length > 0;
+  const stateValid = !stateRequired || stateProvince.trim().length > 0;
+  const zipValid = isRecoveryZipValid(zipCode, rules);
+  const carrierValid = carrierServiceId.length > 0;
+  const costValid = RECOVERY_DECIMAL_PATTERN.test(declaredShippingCost.trim());
+  const itemsValid = items.length > 0 && items.every(isManualItemValid);
+
+  const isFormValid =
+    orderIdValid &&
+    nameValid &&
+    emailValid &&
+    phoneValid &&
+    addressEnabled &&
+    street1Valid &&
+    cityValid &&
+    stateValid &&
+    zipValid &&
+    carrierValid &&
+    costValid &&
+    itemsValid;
+
+  const handleSubmit = async () => {
+    if (!isFormValid || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    const draft: ManualShipmentDraft = {
+      orderId: orderId.trim(),
+      customerName: customerName.trim(),
+      customerEmail: customerEmail.trim(),
+      customerPhone: customerPhone.trim(),
+      countryCode,
+      street1: street1.trim(),
+      street2: street2.trim(),
+      city: city.trim(),
+      state: stateProvince.trim(),
+      zipCode: zipCode.trim(),
+      items: items.map((it) => ({
+        ...it,
+        itemName: it.itemName.trim(),
+        hsCode: it.hsCode.trim(),
+        weight: it.weight.trim(),
+        declaredValue: it.declaredValue.trim(),
+        quantity: it.quantity.trim(),
+      })),
+      carrierServiceId,
+      declaredShippingCost: declaredShippingCost.trim(),
+    };
+    try {
+      const { shipmentId } = await createManualShipmentFromApi(draft);
+      onLog(
+        `Recovery: shipment ${shipmentId} created manually for order ${draft.orderId} ` +
+          `(${draft.items.length} item${draft.items.length === 1 ? "" : "s"}, ${findCountryName(countryCode)}).`,
+      );
+      onCreated(shipmentId, draft.orderId);
+    } catch (e) {
+      console.error(e);
+      setSubmitError("Could not create the shipment. Check the details and try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const countryOptions = RECOVERY_COUNTRY_OPTIONS.map((c) => ({ value: c.code, label: c.name }));
+  const materialOptions = RECOVERY_MATERIAL_OPTIONS.map((m) => ({ value: m, label: m }));
+  const carrierOptions = services.map((s) => ({ value: s.id, label: formatCarrierServiceDisplay(s) }));
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth={false}
+      fullWidth
+      scroll="paper"
+      slotProps={{ backdrop: { sx: { bgcolor: "rgba(0,0,0,0.5)" } } }}
+      PaperProps={{
+        sx: {
+          width: "100%",
+          maxWidth: 960,
+          minHeight: 500,
+          maxHeight: "calc(100% - 64px)",
+          borderRadius: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        },
+      }}
+    >
+      <StandardDialogTitle
+        onClose={onClose}
+        subtitle={
+          <Typography variant="body2" color="text.secondary" sx={{ letterSpacing: "0.15px" }}>
+            Shipment generation failed for this item — enter the details to create the shipment.
+          </Typography>
+        }
+      >
+        Create shipment manually
+      </StandardDialogTitle>
+      <Divider sx={{ flexShrink: 0 }} />
+      <DialogContent
+        sx={{
+          px: 3,
+          pt: 3,
+          pb: 2,
+          flex: "1 1 auto",
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "auto",
+        }}
+      >
+        <Stack spacing={3}>
+          {/* Order */}
+          <Stack spacing={2}>
+            <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
+              Order
+            </Typography>
+            <RecoveryFormField
+              label="Order ID"
+              value={orderId}
+              onChange={setOrderId}
+              valid={orderIdValid}
+              errorText="Order ID is required."
+              placeholder="OR-000000"
+            />
+          </Stack>
+
+          {/* Customer */}
+          <Stack spacing={2}>
+            <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
+              Customer
+            </Typography>
+            <RecoveryFormField
+              label="Full name"
+              value={customerName}
+              onChange={setCustomerName}
+              valid={nameValid}
+              errorText="Full name is required."
+            />
+            <RecoveryFormField
+              label="Email"
+              value={customerEmail}
+              onChange={setCustomerEmail}
+              valid={emailValid}
+              errorText="Enter a valid email address."
+              inputMode="email"
+            />
+            <RecoveryFormField
+              label="Phone"
+              value={customerPhone}
+              onChange={setCustomerPhone}
+              valid={phoneValid}
+              errorText="Phone is required."
+              inputMode="tel"
+            />
+          </Stack>
+
+          {/* Address */}
+          <Stack spacing={2}>
+            <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
+              Address
+            </Typography>
+            <RecoverySelectField
+              label="Country"
+              value={countryCode}
+              onChange={handleCountryChange}
+              options={countryOptions}
+              placeholder="Select a country"
+              helperText="Address rules are loaded from the localization service."
+              endAdornment={countryLoading ? <CircularProgress size={18} thickness={5} /> : null}
+            />
+            <RecoveryFormField
+              label="Street address"
+              value={street1}
+              onChange={setStreet1}
+              valid={street1Valid}
+              errorText="Street address is required."
+              disabled={!addressEnabled}
+            />
+            <RecoveryFormField
+              label="Street address 2"
+              value={street2}
+              onChange={setStreet2}
+              valid
+              optional
+              disabled={!addressEnabled}
+            />
+            <RecoveryFormField
+              label="City"
+              value={city}
+              onChange={setCity}
+              valid={cityValid}
+              errorText="City is required."
+              disabled={!addressEnabled}
+            />
+            {stateOptions.length > 0 ? (
+              <RecoverySelectField
+                label={stateRequired ? "State / Province" : "State / Province (optional)"}
+                value={stateProvince}
+                onChange={setStateProvince}
+                options={stateOptions.map((s) => ({ value: s, label: s }))}
+                disabled={!addressEnabled}
+                showError={addressEnabled && stateRequired && stateProvince.trim().length === 0}
+                errorText="State / Province is required for this country."
+              />
+            ) : (
+              <RecoveryFormField
+                label={stateRequired ? "State / Province" : "State / Province"}
+                value={stateProvince}
+                onChange={setStateProvince}
+                valid={stateValid}
+                errorText="State / Province is required for this country."
+                optional={!stateRequired}
+                disabled={!addressEnabled}
+                helperText={
+                  addressEnabled && !stateRequired
+                    ? "Not required for this country."
+                    : undefined
+                }
+              />
+            )}
+            <RecoveryFormField
+              label="ZIP / Postal code"
+              value={zipCode}
+              onChange={setZipCode}
+              valid={zipValid}
+              errorText={
+                rules?.zipExample
+                  ? `Does not match the format for ${findCountryName(countryCode)} (e.g. ${rules.zipExample}).`
+                  : "Invalid postal code for this country."
+              }
+              helperText={
+                addressEnabled && rules?.zipExample ? `Expected format: ${rules.zipExample}` : undefined
+              }
+              disabled={!addressEnabled}
+            />
+          </Stack>
+
+          {/* Items */}
+          <Stack spacing={2}>
+            <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
+              Items
+            </Typography>
+            {items.map((item, idx) => (
+              <Paper key={item.key} variant="outlined" elevation={0} sx={RECOVERY_CARD_SX}>
+                <Stack spacing={2}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between">
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600, letterSpacing: "0.15px" }}>
+                      Item {idx + 1}
+                    </Typography>
+                    {idx > 0 ? (
+                      <Tooltip title="Remove item">
+                        <IconButton
+                          size="small"
+                          aria-label={`Remove item ${idx + 1}`}
+                          onClick={() => handleRemoveItem(item.key)}
+                        >
+                          <DeleteOutlineIcon />
+                        </IconButton>
+                      </Tooltip>
+                    ) : null}
+                  </Stack>
+                  <RecoveryFormField
+                    label="Item name"
+                    value={item.itemName}
+                    onChange={(v) => patchItem(item.key, { itemName: v })}
+                    valid={item.itemName.trim().length > 0}
+                    errorText="Item name is required."
+                  />
+                  <RecoverySelectField
+                    label="Material"
+                    value={item.material}
+                    onChange={(v) => handleMaterialChange(item.key, v)}
+                    options={materialOptions}
+                    placeholder="Select a material"
+                    helperText="Sets the HS code below."
+                  />
+                  <RecoveryFormField
+                    label="HS code"
+                    value={item.hsCode}
+                    onChange={(v) => patchItem(item.key, { hsCode: v })}
+                    valid={item.hsCode.trim().length > 0}
+                    errorText="HS code is required."
+                    helperText="Auto-filled from the material; edit if needed."
+                  />
+                  <RecoveryFormField
+                    label="Weight (g)"
+                    value={item.weight}
+                    onChange={(v) => patchItem(item.key, { weight: v })}
+                    valid={RECOVERY_DECIMAL_PATTERN.test(item.weight.trim())}
+                    errorText="Enter a number, e.g. 360."
+                    inputMode="decimal"
+                  />
+                  <RecoveryFormField
+                    label="Declared value"
+                    value={item.declaredValue}
+                    onChange={(v) => patchItem(item.key, { declaredValue: v })}
+                    valid={RECOVERY_DECIMAL_PATTERN.test(item.declaredValue.trim())}
+                    errorText="Enter a number, e.g. 27."
+                    inputMode="decimal"
+                  />
+                  <RecoveryFormField
+                    label="Quantity"
+                    value={item.quantity}
+                    onChange={(v) => patchItem(item.key, { quantity: v })}
+                    valid={
+                      RECOVERY_INTEGER_PATTERN.test(item.quantity.trim()) && Number(item.quantity) > 0
+                    }
+                    errorText="Enter a whole number of 1 or more."
+                    inputMode="numeric"
+                  />
+                </Stack>
+              </Paper>
+            ))}
+            <Button
+              size="small"
+              color="primary"
+              startIcon={<AddIcon />}
+              onClick={handleAddItem}
+              sx={{ textTransform: "none", fontWeight: 600, alignSelf: "flex-start", px: 0.5 }}
+            >
+              Add another item
+            </Button>
+          </Stack>
+
+          {/* Shipping */}
+          <Stack spacing={2}>
+            <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
+              Shipping
+            </Typography>
+            <RecoverySelectField
+              label="Carrier service"
+              value={carrierServiceId}
+              onChange={setCarrierServiceId}
+              options={carrierOptions}
+              disabled={!countryCode || countryLoading}
+              placeholder={countryCode ? "Select a carrier service" : "Select a country first"}
+              helperText={
+                countryCode && !countryLoading
+                  ? carrierOptions.length > 0
+                    ? `Available from ${facility?.name ?? facilityId} to ${findCountryName(countryCode)}.`
+                    : `No carrier services from ${facility?.name ?? facilityId} to ${findCountryName(countryCode)}.`
+                  : undefined
+              }
+            />
+            <RecoveryFormField
+              label="Declared shipping cost"
+              value={declaredShippingCost}
+              onChange={setDeclaredShippingCost}
+              valid={costValid}
+              errorText="Enter a number, e.g. 12.50."
+              helperText="Currency is assigned automatically at creation."
+              inputMode="decimal"
+            />
+          </Stack>
+
+          {/* Facility (read-only) */}
+          <Stack spacing={2}>
+            <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
+              Facility details
+            </Typography>
+            {facility ? (
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                <FallbackPackCopyField label="Facility ID" value={facility.id} />
+                <FallbackPackCopyField label="Facility" value={facility.name} />
+                <FallbackPackCopyField
+                  label="Address"
+                  value={`${facility.addressLine}, ${facility.city}, ${facility.country}`}
+                />
+              </Stack>
+            ) : (
+              <CircularProgress size={18} thickness={5} />
+            )}
+          </Stack>
+
+          {submitError ? (
+            <Alert severity="error" variant="standard" icon={<CancelOutlinedIcon />} sx={RECOVERY_ALERT_ERROR_SX}>
+              <Typography
+                variant="body2"
+                sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#5F2120", fontWeight: 500 }}
+              >
+                {submitError}
+              </Typography>
+            </Alert>
+          ) : null}
+        </Stack>
+      </DialogContent>
+      <Divider sx={{ flexShrink: 0 }} />
+      <DialogActions sx={{ px: 3, py: 2, justifyContent: "space-between", flexShrink: 0, gap: 2 }}>
+        <Button variant="outlined" onClick={onClose} sx={{ ...DIALOG_CANCEL_BUTTON_SX, py: 1, px: 2.75 }}>
+          Cancel
+        </Button>
+        <Stack direction="row" alignItems="center" spacing={2}>
+          {!isFormValid ? (
+            <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: "0.15px" }}>
+              Complete all required fields to continue.
+            </Typography>
+          ) : null}
+          <Button
+            variant="contained"
+            color="primary"
+            disabled={!isFormValid || submitting}
+            onClick={() => void handleSubmit()}
+            startIcon={
+              submitting ? (
+                <CircularProgress size={18} color="inherit" sx={{ color: "#fff !important" }} />
+              ) : (
+                <LocalShippingOutlinedIcon />
+              )
+            }
+            sx={{ py: 1, px: 2.75 }}
+          >
+            {submitting ? "Creating…" : "Create shipment"}
+          </Button>
+        </Stack>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+/** Marks a line item that has not left production yet; cleared once "Item Sent" is ticked. */
+function InProductionChip() {
+  return (
+    <Chip
+      icon={<PrecisionManufacturingIcon sx={{ fontSize: "16px !important", color: "#663C00" }} />}
+      label="In production"
+      size="small"
+      sx={{
+        height: 26,
+        fontWeight: 700,
+        fontSize: 13,
+        letterSpacing: "0.15px",
+        color: "#663C00",
+        bgcolor: orange[50],
+        border: "1px solid",
+        borderColor: alpha("#ed6c02", 0.4),
+        "& .MuiChip-icon": { ml: "6px", mr: "-2px", color: "#663C00" },
+        "& .MuiChip-label": { px: 0.75 },
+      }}
+    />
+  );
+}
+
 function OtherFacilityLocationChip({ label }: { label: string }) {
   return (
     <Chip
@@ -4346,6 +5776,27 @@ export default function ReadyToPack() {
     original: JoinTransferItem[];
     newShipment: JoinTransferItem[];
   } | null>(null);
+  /** Shipment recovery: which outcome the current not-found query simulates; null outside recovery. */
+  const [recoveryScenario, setRecoveryScenario] = useState<RecoveryScenario | null>(null);
+  const [recoveryConfirmOpen, setRecoveryConfirmOpen] = useState(false);
+  const [recoveryHubOpen, setRecoveryHubOpen] = useState(false);
+  const [manualShipmentDialogOpen, setManualShipmentDialogOpen] = useState(false);
+  /** Order ID prefilled into manual creation, taken from the TG Supplier lookup when available. */
+  const [manualShipmentPrefillOrderId, setManualShipmentPrefillOrderId] = useState("");
+  /** Line items still in production; ticking "Item sent" releases them for shipment. */
+  const [inProductionItemIds, setInProductionItemIds] = useState<string[]>([]);
+  /** Item ids currently mid-release, so the checkbox can show progress and block double submits. */
+  const [inProductionSendingItemIds, setInProductionSendingItemIds] = useState<string[]>([]);
+  /** Shipment history is append-only at runtime; recovery actions are recorded here. */
+  const [shipmentHistoryEntries, setShipmentHistoryEntries] = useState<HistoryLogEntry[]>(
+    () => [...SHIPMENT_HISTORY_LOG],
+  );
+  /**
+   * Recovery ends by loading the recovered shipment, which runs the `loadedOrderId`
+   * reset and would otherwise wipe the entries recovery just wrote. These carry across
+   * that one load; cleared by any ordinary search.
+   */
+  const recoveryHistoryCarryRef = useRef<HistoryLogEntry[]>([]);
   /** On-hold only: item IDs at another facility until Kiriyat Gat marks received (Figma 1744:42531). */
   const [remoteFacilityItemIds, setRemoteFacilityItemIds] = useState<string[]>([]);
   /** Line items marked received from another facility — rendered at bottom in this order, not in fixed meta slots. */
@@ -4601,6 +6052,14 @@ export default function ReadyToPack() {
 
   const moreActionsMenuItems = orderPacked ? MORE_ACTIONS_MENU_ITEMS_PACKED : MORE_ACTIONS_MENU_ITEMS_DEFAULT;
 
+  /**
+   * Barcode shown in the recovery dialogs. Demo keywords carry a plausible item-label
+   * barcode; anything else falls back to what was actually searched.
+   */
+  const recoveryBarcode = recoveryScenario
+    ? getScenarioBarcode(recoveryScenario)
+    : (notFoundQuery ?? "");
+
   const filteredRemarksMessages = useMemo(() => {
     return shipmentMessages
       .filter((m) => remarksTab === "all" || m.channel === remarksTab)
@@ -4617,6 +6076,9 @@ export default function ReadyToPack() {
 
   const isEmptyState = loadedOrderId === null;
   const isInitialScanScreen = isEmptyState && notFoundQuery === null;
+  /** Nothing to clear on the untouched scan screen. */
+  const showClearSearchButton =
+    orderInput.trim().length > 0 || loadedOrderId !== null || notFoundQuery !== null;
 
   const showShipmentPendingDialog =
     isPrototypePendingOrderId(loadedOrderId) && !pendingShipmentDialogDismissed;
@@ -4691,6 +6153,13 @@ export default function ReadyToPack() {
     setJoinShipmentDialogOpen(false);
     setSplitShipmentDialogOpen(false);
     setShipmentMessages(buildInitialShipmentMessages());
+    const carriedRecoveryHistory = recoveryHistoryCarryRef.current;
+    recoveryHistoryCarryRef.current = [];
+    setShipmentHistoryEntries([...carriedRecoveryHistory, ...SHIPMENT_HISTORY_LOG]);
+    setInProductionItemIds(
+      isPrototypeInProductionOrderId(loadedOrderId) ? [...PROTOTYPE_IN_PRODUCTION_ITEM_IDS] : [],
+    );
+    setInProductionSendingItemIds([]);
     setRemarksTab("all");
     setCreateRemarkOpen(false);
     setCreateRemarkDefaultItemId(null);
@@ -4886,9 +6355,134 @@ export default function ReadyToPack() {
     ]);
   };
 
+  /**
+   * Appends an audit entry to the shipment log, attributed to the acting user.
+   * `source` doubles as the actor in `HistoryLogEntry`, so the name goes there.
+   */
+  const appendShipmentHistory = (detail: string, options?: { carryAcrossLoad?: boolean }) => {
+    const entry: HistoryLogEntry = {
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `hist-${Date.now()}`,
+      at: formatHistoryTimestamp(new Date()),
+      source: headerProfileDisplayName,
+      detail,
+    };
+    setShipmentHistoryEntries((prev) => [entry, ...prev]);
+    if (options?.carryAcrossLoad) {
+      recoveryHistoryCarryRef.current = [entry, ...recoveryHistoryCarryRef.current];
+    }
+  };
+
+  /** Recovery actions must survive the load into the recovered shipment. */
+  const appendRecoveryHistory = (detail: string) =>
+    appendShipmentHistory(detail, { carryAcrossLoad: true });
+
+  /** Explicit user action from the not-found state — never triggered by the lookup itself. */
+  const handleStartShipmentRecovery = () => {
+    if (!HAS_SHIPMENT_RECOVERY_PERMISSION) return;
+    // A plain not-found query has no scenario; default the demo to the happy path.
+    if (recoveryScenario === null) setRecoveryScenario("happyPath");
+    setRecoveryConfirmOpen(true);
+  };
+
+  const handleRecoveryConfirmStart = () => {
+    setRecoveryConfirmOpen(false);
+    setRecoveryHubOpen(true);
+    appendRecoveryHistory(`Recovery: shipment recovery started for barcode ${recoveryBarcode}.`);
+  };
+
+  /** Generation succeeded — drop into the normal shipment details view. */
+  const handleRecoveryCompleted = (orderId: string, shipmentId: string) => {
+    setRecoveryHubOpen(false);
+    setManualShipmentDialogOpen(false);
+    setRecoveryConfirmOpen(false);
+    setRecoveryScenario(null);
+    setNotFoundQuery(null);
+    setOrderInput(orderId);
+    appendRecoveryHistory(`Recovery: shipment ${shipmentId} loaded for packing.`);
+    setLoadedOrderId(PROTOTYPE_PACK_ORDER_ID);
+  };
+
+  const handleOpenManualShipmentCreation = (record: TgSupplierItemRecord | null) => {
+    setManualShipmentPrefillOrderId(record?.orderId ?? "");
+    setRecoveryHubOpen(false);
+    setManualShipmentDialogOpen(true);
+  };
+
+  const handleManualShipmentCreated = (shipmentId: string, orderId: string) => {
+    handleRecoveryCompleted(orderId, shipmentId);
+  };
+
+  /**
+   * In-production release: mark the item sent in TG Supplier, then fire the same
+   * generation trigger the QA "sent" event uses. On success the row becomes
+   * available for shipment.
+   */
+  const handleInProductionItemSentChange = async (itemId: string, checked: boolean) => {
+    if (!checked || !HAS_SHIPMENT_RECOVERY_PERMISSION) return;
+    if (inProductionSendingItemIds.includes(itemId)) return;
+    const itemLabel = PACK_LINE_ITEM_META.find((m) => m.id === itemId)?.title ?? itemId;
+    setInProductionSendingItemIds((prev) => [...prev, itemId]);
+    try {
+      await markItemSentInTgSupplierFromApi(itemId, headerProfileDisplayName);
+      appendShipmentHistory(`In-production release: ${itemLabel} marked as sent in TG Supplier.`);
+      await triggerShipmentGenerationFromApi(itemId);
+      setInProductionItemIds((prev) => prev.filter((id) => id !== itemId));
+      appendShipmentHistory(`In-production release: ${itemLabel} is now available for shipment.`);
+    } catch (e) {
+      console.error(e);
+      appendShipmentHistory(`In-production release failed for ${itemLabel}.`);
+    } finally {
+      setInProductionSendingItemIds((prev) => prev.filter((id) => id !== itemId));
+    }
+  };
+
+  /**
+   * "Item sent" control, mirroring `remoteFacilityItemReceivedControl`: only for the
+   * in-production prototype, only for items still in production, and only when the
+   * item sits in the current packing facility.
+   */
+  const inProductionItemSentControl = (itemId: string): ReactNode => {
+    if (!HAS_SHIPMENT_RECOVERY_PERMISSION) return null;
+    if (!isPrototypeInProductionOrderId(loadedOrderId)) return null;
+    if (!inProductionItemIds.includes(itemId)) return null;
+    if (getInProductionItemFacilityId(itemId) !== CURRENT_PACKING_FACILITY_ID) return null;
+    const sending = inProductionSendingItemIds.includes(itemId);
+    return (
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <InProductionChip />
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              color="info"
+              checked={false}
+              disabled={sending}
+              onChange={(_, checked) => void handleInProductionItemSentChange(itemId, checked)}
+              sx={{ py: 0.5 }}
+            />
+          }
+          label={
+            <Stack direction="row" alignItems="center" spacing={0.75}>
+              <Typography variant="body1" sx={{ fontSize: 16, letterSpacing: "0.15px" }}>
+                Item Sent
+              </Typography>
+              {sending ? <CircularProgress size={14} thickness={5} /> : null}
+            </Stack>
+          }
+          sx={{ m: 0, mr: 0, gap: 0.5, alignItems: "center" }}
+        />
+      </Stack>
+    );
+  };
+
   const handleLoadOrderFromInput = (raw: string) => {
     const trimmed = raw.trim();
     setOrderInput(trimmed);
+    // An ordinary search abandons any in-flight recovery, so its log entries stop here.
+    recoveryHistoryCarryRef.current = [];
     const id = normalizeOrderIdForLoad(trimmed);
     const queryKey = stripLeadingHashSearchPrefix(trimmed).toLowerCase();
     if (!id) {
@@ -4898,13 +6492,25 @@ export default function ReadyToPack() {
       setOrderBrowseStack([]);
       return;
     }
-    if (isZeroOnlyShipmentQuery(id)) {
+    if (isNoShipmentsQuery(id)) {
       prototypeFallbackSupervisorLoadRef.current = false;
       setLoadedOrderId(null);
       setNotFoundQuery(id);
       setOrderBrowseStack([]);
+      // Set synchronously here rather than in the [loadedOrderId] effect, which does
+      // not re-run for not-found queries and would read a stale batched `orderInput`.
+      const scenario = resolveRecoveryScenario(id);
+      setRecoveryScenario(scenario);
+      setRecoveryHubOpen(false);
+      setManualShipmentDialogOpen(false);
+      // Only the recovery demo keywords auto-open; a plain failed lookup never does.
+      setRecoveryConfirmOpen(scenario !== null && HAS_SHIPMENT_RECOVERY_PERMISSION);
       return;
     }
+    setRecoveryScenario(null);
+    setRecoveryConfirmOpen(false);
+    setRecoveryHubOpen(false);
+    setManualShipmentDialogOpen(false);
     prototypeFallbackSupervisorLoadRef.current =
       id === PROTOTYPE_FALLBACK_ORDER_ID &&
       (queryKey === PROTOTYPE_FALLBACK_SUPERVISOR_SEARCH || queryKey === "fallback_supervisor");
@@ -4919,6 +6525,21 @@ export default function ReadyToPack() {
 
   const handleLoadOrder = () => {
     handleLoadOrderFromInput(orderInput);
+  };
+
+  /** Clears the search and returns the screen to the initial scan state. */
+  const handleClearSearch = () => {
+    prototypeFallbackSupervisorLoadRef.current = false;
+    recoveryHistoryCarryRef.current = [];
+    setOrderInput("");
+    setNotFoundQuery(null);
+    setOrderBrowseStack([]);
+    setRecoveryScenario(null);
+    setRecoveryConfirmOpen(false);
+    setRecoveryHubOpen(false);
+    setManualShipmentDialogOpen(false);
+    // Clearing `loadedOrderId` runs the reset effect, which restores the rest.
+    setLoadedOrderId(null);
   };
 
   const handleNextOrder = () => {
@@ -5071,6 +6692,18 @@ export default function ReadyToPack() {
                     ),
                     endAdornment: (
                       <InputAdornment position="end">
+                        {showClearSearchButton ? (
+                          <Tooltip title="Clear search">
+                            <IconButton
+                              size="small"
+                              aria-label="Clear search"
+                              onClick={handleClearSearch}
+                              sx={{ mr: 0.25 }}
+                            >
+                              <CloseIcon sx={{ fontSize: 20 }} />
+                            </IconButton>
+                          </Tooltip>
+                        ) : null}
                         <Tooltip
                           title={
                             orderInput.trim()
@@ -5840,7 +7473,11 @@ export default function ReadyToPack() {
                 itemId={PACK_LINE_ITEM_META[0].id}
                 itemRemarkCount={remarkCountByItemId[PACK_LINE_ITEM_META[0].id] ?? 0}
                 onItemRemarksClick={() => openItemRemarksDialog(PACK_LINE_ITEM_META[0].id)}
-                titleRowEnd={remoteFacilityItemReceivedControl(PACK_LINE_ITEM_META[0].id) ?? undefined}
+                titleRowEnd={
+                  remoteFacilityItemReceivedControl(PACK_LINE_ITEM_META[0].id) ??
+                  inProductionItemSentControl(PACK_LINE_ITEM_META[0].id) ??
+                  undefined
+                }
                 details={
                   <>
                     <SectionOverline>Details</SectionOverline>
@@ -5880,6 +7517,7 @@ export default function ReadyToPack() {
                   itemId={PACK_LINE_ITEM_META[1].id}
                   itemRemarkCount={remarkCountByItemId[PACK_LINE_ITEM_META[1].id] ?? 0}
                   onItemRemarksClick={() => openItemRemarksDialog(PACK_LINE_ITEM_META[1].id)}
+                  titleRowEnd={inProductionItemSentControl(PACK_LINE_ITEM_META[1].id) ?? undefined}
                   details={
                     <>
                       <SectionOverline>Details</SectionOverline>
@@ -5918,6 +7556,7 @@ export default function ReadyToPack() {
                   itemId={PACK_LINE_ITEM_META[2].id}
                   itemRemarkCount={remarkCountByItemId[PACK_LINE_ITEM_META[2].id] ?? 0}
                   onItemRemarksClick={() => openItemRemarksDialog(PACK_LINE_ITEM_META[2].id)}
+                  titleRowEnd={inProductionItemSentControl(PACK_LINE_ITEM_META[2].id) ?? undefined}
                   details={
                     <>
                       <SectionOverline>Details</SectionOverline>
@@ -5958,6 +7597,7 @@ export default function ReadyToPack() {
                   itemId={item.id}
                   itemRemarkCount={remarkCountByItemId[item.id] ?? 0}
                   onItemRemarksClick={() => openItemRemarksDialog(item.id)}
+                  titleRowEnd={inProductionItemSentControl(item.id) ?? undefined}
                   details={
                     <>
                       <SectionOverline>Details</SectionOverline>
@@ -7400,10 +9040,52 @@ export default function ReadyToPack() {
         </Stack>
       </Box>
       ) : notFoundQuery ? (
-        <NoShipmentsFoundHero shippingId={notFoundQuery} />
+        <NoShipmentsFoundHero
+          shippingId={notFoundQuery}
+          action={
+            HAS_SHIPMENT_RECOVERY_PERMISSION ? (
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<RestartAltIcon />}
+                onClick={handleStartShipmentRecovery}
+                sx={{ py: 1, px: 3 }}
+              >
+                Start shipment recovery
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
         <EmptyStateHero />
       )}
+      <ShipmentRecoveryConfirmDialog
+        open={recoveryConfirmOpen}
+        barcode={recoveryBarcode}
+        onCancel={() => setRecoveryConfirmOpen(false)}
+        onStart={handleRecoveryConfirmStart}
+      />
+      {recoveryScenario && (
+        <ShipmentRecoveryHubDialog
+          open={recoveryHubOpen}
+          barcode={recoveryBarcode}
+          scenario={recoveryScenario}
+          actorName={headerProfileDisplayName}
+          currentFacilityId={CURRENT_PACKING_FACILITY_ID}
+          onClose={() => setRecoveryHubOpen(false)}
+          onLog={appendRecoveryHistory}
+          onRecovered={handleRecoveryCompleted}
+          onCreateManually={handleOpenManualShipmentCreation}
+        />
+      )}
+      <ManualShipmentCreationDialog
+        open={manualShipmentDialogOpen}
+        prefillOrderId={manualShipmentPrefillOrderId}
+        facilityId={CURRENT_PACKING_FACILITY_ID}
+        onClose={() => setManualShipmentDialogOpen(false)}
+        onLog={appendRecoveryHistory}
+        onCreated={handleManualShipmentCreated}
+      />
       <FallbackPackDialog
         open={fallbackPackDialogOpen}
         onClose={() => setFallbackPackDialogOpen(false)}
@@ -7467,6 +9149,7 @@ export default function ReadyToPack() {
           open={shipmentHistoryDialogOpen}
           onClose={() => setShipmentHistoryDialogOpen(false)}
           shipmentId={displayedShipmentId}
+          entries={shipmentHistoryEntries}
         />
       )}
       {loadedOrderId && (
