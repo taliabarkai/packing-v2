@@ -97,6 +97,7 @@ import PlaceOutlinedIcon from "@mui/icons-material/PlaceOutlined";
 import PrecisionManufacturingIcon from "@mui/icons-material/PrecisionManufacturing";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import AddIcon from "@mui/icons-material/Add";
+import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 
 import { LinkedShipmentTabs, type LinkedShipmentTabItem } from "../components/LinkedShipmentTabs";
 import { loadNewSplitShipmentIdFromApi } from "../api/loadNewSplitShipmentId";
@@ -4883,6 +4884,28 @@ function ShipmentRecoveryHubDialog({
   );
 }
 
+/**
+ * Prototype only: one click fills the whole manual-shipment form with a valid
+ * draft so a demo does not have to type twelve fields. Remove with the mock data.
+ */
+const MANUAL_SHIPMENT_MOCK_DRAFT = {
+  orderId: "OR-772310",
+  customerName: "Dana Cohen",
+  customerEmail: "dana.cohen@example.com",
+  customerPhone: "+1 415 555 0134",
+  countryCode: "US",
+  street1: "1200 Market Street",
+  street2: "Apt 4B",
+  city: "New York",
+  stateProvince: "New York",
+  zipCode: "10001",
+  declaredShippingCost: "12.50",
+  items: [
+    { itemName: "Birthstone Ring — 14K Solid Gold", material: "14K Solid Gold", weight: "360", declaredValue: "27", quantity: "1" },
+    { itemName: "Curb Chain Bracelet", material: "925 Sterling Silver", weight: "180", declaredValue: "42", quantity: "2" },
+  ],
+} as const;
+
 function makeBlankManualItem(key: string): ManualShipmentItemDraft {
   return { key, itemName: "", material: "", hsCode: "", weight: "", declaredValue: "", quantity: "1" };
 }
@@ -4938,6 +4961,8 @@ function ManualShipmentCreationDialog({
   const [facility, setFacility] = useState<FacilityConfig | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /** Prototype only: true while the demo-fill button resolves country data. */
+  const [fillingMock, setFillingMock] = useState(false);
   const itemKeyRef = useRef(0);
 
   useEffect(() => {
@@ -5037,6 +5062,48 @@ function ManualShipmentCreationDialog({
 
   const handleRemoveItem = (key: string) => {
     setItems((prev) => (prev.length <= 1 ? prev : prev.filter((it) => it.key !== key)));
+  };
+
+  /** Prototype only: fills every field with a valid draft for a demo. */
+  const handleFillMockData = async () => {
+    const mock = MANUAL_SHIPMENT_MOCK_DRAFT;
+    setOrderId(mock.orderId);
+    setCustomerName(mock.customerName);
+    setCustomerEmail(mock.customerEmail);
+    setCustomerPhone(mock.customerPhone);
+    setStreet1(mock.street1);
+    setStreet2(mock.street2);
+    setCity(mock.city);
+    setCountryCode(mock.countryCode);
+    setItems(
+      mock.items.map((it, idx) => {
+        itemKeyRef.current = Math.max(itemKeyRef.current, idx + 1);
+        return {
+          ...makeBlankManualItem(`manual-item-${idx + 1}`),
+          ...it,
+          hsCode: getHsCodeForMaterial(it.material),
+        };
+      }),
+    );
+    setDeclaredShippingCost(mock.declaredShippingCost);
+    setSubmitError(null);
+    // State, ZIP and carrier depend on the country, so wait for its rules and services.
+    setFillingMock(true);
+    try {
+      const [nextRules, nextServices] = await Promise.all([
+        loadCountryAddressRulesFromApi(mock.countryCode),
+        loadCarrierServicesFromApi(facilityId, mock.countryCode),
+      ]);
+      setRules(nextRules);
+      setServices(nextServices);
+      setStateProvince(mock.stateProvince);
+      setZipCode(mock.zipCode);
+      setCarrierServiceId(nextServices[0]?.id ?? "");
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFillingMock(false);
+    }
   };
 
   const addressEnabled = Boolean(rules) && !countryLoading;
@@ -5446,6 +5513,17 @@ function ManualShipmentCreationDialog({
           Cancel
         </Button>
         <Stack direction="row" alignItems="center" spacing={2}>
+          {/* Prototype only: skips typing the form during a demo. */}
+          <Button
+            variant="outlined"
+            color="secondary"
+            disabled={fillingMock || submitting}
+            onClick={() => void handleFillMockData()}
+            startIcon={fillingMock ? <CircularProgress size={18} color="inherit" /> : <AutoFixHighIcon />}
+            sx={{ py: 1, px: 2.75 }}
+          >
+            {fillingMock ? "Filling…" : "Fill mock data"}
+          </Button>
           <Button
             variant="contained"
             color="secondary"
@@ -6315,8 +6393,8 @@ export default function ReadyToPack() {
       const scenario = resolveRecoveryScenario(id);
       setRecoveryScenario(scenario);
       setManualShipmentDialogOpen(false);
-      // Only the recovery demo keywords auto-open; a plain failed lookup never does.
-      setRecoveryHubOpen(scenario !== null && HAS_SHIPMENT_RECOVERY_PERMISSION);
+      // The scenario only arms the demo; the hub opens from "Start shipment recovery".
+      setRecoveryHubOpen(false);
       return;
     }
     setRecoveryScenario(null);
