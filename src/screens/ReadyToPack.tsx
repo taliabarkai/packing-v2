@@ -5223,7 +5223,6 @@ function ManualShipmentCreationDialog({
               onChange={handleCountryChange}
               options={countryOptions}
               placeholder="Select a country"
-              helperText="Address rules are loaded from the localization service."
               endAdornment={countryLoading ? <CircularProgress size={18} thickness={5} /> : null}
             />
             <RecoveryFormField
@@ -5269,11 +5268,6 @@ function ManualShipmentCreationDialog({
                 errorText="State / Province is required for this country."
                 optional={!stateRequired}
                 disabled={!addressEnabled}
-                helperText={
-                  addressEnabled && !stateRequired
-                    ? "Not required for this country."
-                    : undefined
-                }
               />
             )}
             <RecoveryFormField
@@ -5285,9 +5279,6 @@ function ManualShipmentCreationDialog({
                 rules?.zipExample
                   ? `Does not match the format for ${findCountryName(countryCode)} (e.g. ${rules.zipExample}).`
                   : "Invalid postal code for this country."
-              }
-              helperText={
-                addressEnabled && rules?.zipExample ? `Expected format: ${rules.zipExample}` : undefined
               }
               disabled={!addressEnabled}
             />
@@ -5334,7 +5325,6 @@ function ManualShipmentCreationDialog({
                     onChange={(v) => handleMaterialChange(item.key, v)}
                     options={materialOptions}
                     placeholder="Select a material"
-                    helperText="Sets the HS code below."
                   />
                   <RecoveryFormField
                     label="HS code"
@@ -5342,7 +5332,6 @@ function ManualShipmentCreationDialog({
                     onChange={(v) => patchItem(item.key, { hsCode: v })}
                     valid={item.hsCode.trim().length > 0}
                     errorText="HS code is required."
-                    helperText="Auto-filled from the material; edit if needed."
                   />
                   <RecoveryFormField
                     label="Weight (g)"
@@ -5401,10 +5390,8 @@ function ManualShipmentCreationDialog({
               disabled={!countryCode || countryLoading}
               placeholder={countryCode ? "Select a carrier service" : "Select a country first"}
               helperText={
-                countryCode && !countryLoading
-                  ? carrierOptions.length > 0
-                    ? `Available from ${facility?.name ?? facilityId} to ${findCountryName(countryCode)}.`
-                    : `No carrier services from ${facility?.name ?? facilityId} to ${findCountryName(countryCode)}.`
+                countryCode && !countryLoading && carrierOptions.length === 0
+                  ? `No carrier services from ${facility?.name ?? facilityId} to ${findCountryName(countryCode)}.`
                   : undefined
               }
             />
@@ -5414,7 +5401,6 @@ function ManualShipmentCreationDialog({
               onChange={setDeclaredShippingCost}
               valid={costValid}
               errorText="Enter a number, e.g. 12.50."
-              helperText="Currency is assigned automatically at creation."
               inputMode="decimal"
             />
             </Stack>
