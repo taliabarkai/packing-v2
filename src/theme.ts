@@ -6,6 +6,7 @@ export const theme = createTheme({
   },
   palette: {
     primary: { main: "#1976d2", dark: "rgba(1, 87, 155, 1)" },
+    // secondary is MUI's default purple (#9c27b0) — used for shipment recovery actions.
     background: { default: "#f9f9fb", paper: "#ffffff" },
     text: { primary: "rgba(0,0,0,0.87)", secondary: "rgba(0,0,0,0.6)" },
     divider: "rgba(0,0,0,0.12)",
@@ -27,6 +28,12 @@ export const theme = createTheme({
           borderRadius: "50px",
         },
         outlinedPrimary: {
+          borderRadius: "50px",
+        },
+        containedSecondary: {
+          borderRadius: "50px",
+        },
+        outlinedSecondary: {
           borderRadius: "50px",
         },
       },

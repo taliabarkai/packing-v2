@@ -44,6 +44,7 @@ import {
   RadioGroup,
   Select,
   type SelectChangeEvent,
+  Snackbar,
   Stack,
   Tab,
   Tabs,
@@ -87,6 +88,7 @@ import ScreenshotMonitorIcon from "@mui/icons-material/ScreenshotMonitor";
 import LaptopIcon from "@mui/icons-material/Laptop";
 import NorthEastIcon from "@mui/icons-material/NorthEast";
 import NumbersIcon from "@mui/icons-material/Numbers";
+import ManageSearchIcon from "@mui/icons-material/ManageSearch";
 import SearchIcon from "@mui/icons-material/Search";
 import ShoppingBagOutlinedIcon from "@mui/icons-material/ShoppingBagOutlined";
 import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
@@ -95,10 +97,6 @@ import PlaceOutlinedIcon from "@mui/icons-material/PlaceOutlined";
 import PrecisionManufacturingIcon from "@mui/icons-material/PrecisionManufacturing";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import AddIcon from "@mui/icons-material/Add";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
-import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
-import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import QrCode2Icon from "@mui/icons-material/QrCode2";
 
 import { LinkedShipmentTabs, type LinkedShipmentTabItem } from "../components/LinkedShipmentTabs";
 import { loadNewSplitShipmentIdFromApi } from "../api/loadNewSplitShipmentId";
@@ -4370,10 +4368,6 @@ function CarrierShippingRouteDialog({
  * Confirm → hub (check details / mark as sent) → manual creation on failure.
  * ------------------------------------------------------------------------- */
 
-/** Circle badge behind the recovery glyph; matches the pending-modal treatment. */
-const RECOVERY_ICON_CIRCLE_BG = "#FEF3E7";
-const RECOVERY_DETAIL_BOX_BG = "#F5F5F5";
-
 /** Inline alert styling, matching the Status card alerts. */
 const RECOVERY_ALERT_WARNING_SX = {
   alignItems: "flex-start",
@@ -4426,20 +4420,38 @@ const RECOVERY_CARD_SX = {
 } as const;
 
 const RECOVERY_SECTION_TITLE_SX = {
-  fontWeight: 600,
+  fontWeight: 700,
+  fontSize: "1rem",
   color: "text.primary",
   letterSpacing: "0.15px",
+} as const;
+
+/** The two recovery actions sit side by side at the bottom of the hub dialog. */
+const RECOVERY_ACTION_BUTTON_SX = { py: 1.25, px: 2.5, fontSize: "0.9375rem" } as const;
+
+/**
+ * Grey panel that holds a section's fields. The section title sits above it, so the
+ * heading reads as a heading and the fields inside it as one group.
+ */
+const RECOVERY_SECTION_PANEL_SX = {
+  bgcolor: "#fafafa",
+  borderRadius: 1.5,
+  p: 2,
 } as const;
 
 const RECOVERY_FIELD_LABEL_SX = {
   width: 156,
   flexShrink: 0,
-  fontWeight: 600,
+  fontSize: "0.875rem",
+  fontWeight: 500,
   color: "text.primary",
   pt: 1.25,
 } as const;
 
-const RECOVERY_FIELD_SX = { "& .MuiOutlinedInput-root": { borderRadius: 1 } } as const;
+// Inputs keep a white surface so they stay legible on the grey section panel.
+const RECOVERY_FIELD_SX = {
+  "& .MuiOutlinedInput-root": { borderRadius: 1, bgcolor: "#fff" },
+} as const;
 
 const RECOVERY_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RECOVERY_DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
@@ -4580,162 +4592,6 @@ function RecoverySelectField({
   );
 }
 
-function ShipmentRecoveryConfirmDialog({
-  open,
-  barcode,
-  onCancel,
-  onStart,
-}: {
-  open: boolean;
-  barcode: string;
-  onCancel: () => void;
-  onStart: () => void;
-}) {
-  return (
-    <Dialog
-      open={open}
-      onClose={(_, reason) => {
-        if (reason === "backdropClick" || reason === "escapeKeyDown") onCancel();
-      }}
-      maxWidth={false}
-      scroll="paper"
-      slotProps={{ backdrop: { sx: { bgcolor: "rgba(0,0,0,0.5)" } } }}
-      PaperProps={{
-        component: Paper,
-        elevation: 0,
-        sx: {
-          width: "100%",
-          maxWidth: 540,
-          minHeight: 420,
-          maxHeight: "calc(100% - 64px)",
-          borderRadius: 1,
-          overflow: "hidden",
-          ...elevationSx,
-          display: "flex",
-          flexDirection: "column",
-        },
-      }}
-    >
-      <StandardDialogTitle onClose={onCancel}>Start shipment recovery?</StandardDialogTitle>
-      <Divider sx={{ flexShrink: 0 }} />
-      <DialogContent
-        sx={{
-          px: 3,
-          pt: 3,
-          pb: 3,
-          flex: "1 1 auto",
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Stack
-          alignItems="center"
-          spacing={2.5}
-          sx={{ textAlign: "center", width: "100%", maxWidth: 440, mx: "auto" }}
-        >
-          <Box
-            aria-hidden
-            sx={{
-              width: 64,
-              height: 64,
-              borderRadius: "50%",
-              bgcolor: RECOVERY_ICON_CIRCLE_BG,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <RestartAltIcon sx={{ fontSize: 36, color: "warning.main" }} />
-          </Box>
-          <Typography
-            variant="body1"
-            sx={{
-              color: "text.primary",
-              fontSize: 16,
-              fontWeight: 700,
-              letterSpacing: "0.15px",
-              lineHeight: 1.5,
-            }}
-          >
-            No shipment exists for this item yet.
-          </Typography>
-          <Typography
-            variant="body2"
-            sx={{
-              color: "text.secondary",
-              fontSize: 14,
-              letterSpacing: "0.15px",
-              lineHeight: 1.5,
-            }}
-          >
-            Recovery checks the item against TG Supplier and retries shipment generation.
-          </Typography>
-          <Box
-            sx={{
-              width: "100%",
-              py: 1.5,
-              px: 2,
-              borderRadius: 1,
-              bgcolor: RECOVERY_DETAIL_BOX_BG,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 1,
-            }}
-          >
-            <QrCode2Icon sx={{ fontSize: 22, color: "text.secondary", flexShrink: 0 }} />
-            <Typography
-              variant="body2"
-              sx={{ color: "text.primary", lineHeight: 1.5, letterSpacing: "0.15px", wordBreak: "break-all" }}
-            >
-              <Box component="span" fontWeight={700}>
-                Scanned barcode:
-              </Box>{" "}
-              <Box component="span" fontWeight={400}>
-                {barcode}
-              </Box>
-            </Typography>
-          </Box>
-          <Alert
-            severity="warning"
-            variant="standard"
-            icon={<WarningAmberRoundedIcon />}
-            sx={{ ...RECOVERY_ALERT_WARNING_SX, width: "100%", textAlign: "left" }}
-          >
-            <Typography
-              variant="body2"
-              sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#663C00", fontWeight: 500 }}
-            >
-              Every recovery action is recorded in the shipment log and attributed to you.
-            </Typography>
-          </Alert>
-        </Stack>
-      </DialogContent>
-      <DialogActions
-        sx={{
-          px: 3,
-          py: 2,
-          justifyContent: "space-between",
-          flexShrink: 0,
-          borderTop: 1,
-          borderColor: "divider",
-          gap: 2,
-        }}
-      >
-        <Button variant="outlined" onClick={onCancel} sx={{ ...DIALOG_CANCEL_BUTTON_SX, py: 1, px: 2.5 }}>
-          Cancel
-        </Button>
-        <Button variant="contained" color="primary" onClick={onStart} sx={{ py: 1, px: 2.5 }}>
-          Start recovery
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
 type RecoveryDetailsPhase = "idle" | "loading" | "loaded" | "noRecord";
 type RecoveryMarkSentPhase = "idle" | "loading" | "facilityMismatch" | "noRecord" | "failed";
 
@@ -4834,6 +4690,8 @@ function ShipmentRecoveryHubDialog({
   const detailsLoading = detailsPhase === "loading";
   const markSentLoading = markSentPhase === "loading";
   const busy = detailsLoading || markSentLoading;
+  /** Either action can discover the barcode has no TG Supplier record. */
+  const noRecordFound = detailsPhase === "noRecord" || markSentPhase === "noRecord";
 
   return (
     <Dialog
@@ -4846,8 +4704,7 @@ function ShipmentRecoveryHubDialog({
       PaperProps={{
         sx: {
           width: "100%",
-          maxWidth: 700,
-          minHeight: 500,
+          maxWidth: 600,
           maxHeight: "calc(100% - 64px)",
           borderRadius: 1,
           display: "flex",
@@ -4856,27 +4713,7 @@ function ShipmentRecoveryHubDialog({
         },
       }}
     >
-      <StandardDialogTitle
-        onClose={onClose}
-        subtitle={
-          <Chip
-            icon={<QrCode2Icon sx={{ fontSize: "18px !important", color: "text.primary" }} />}
-            label={barcode}
-            size="small"
-            sx={{
-              height: 26,
-              fontWeight: 600,
-              fontSize: 13,
-              letterSpacing: "0.15px",
-              color: "text.primary",
-              bgcolor: "grey.200",
-              "& .MuiChip-label": { px: 0.75 },
-            }}
-          />
-        }
-      >
-        Shipment recovery
-      </StandardDialogTitle>
+      <StandardDialogTitle onClose={onClose}>Shipment recovery</StandardDialogTitle>
       <Divider sx={{ flexShrink: 0 }} />
       <DialogContent
         sx={{
@@ -4891,186 +4728,157 @@ function ShipmentRecoveryHubDialog({
         }}
       >
         <Stack spacing={2.5}>
-          {/* Card 1 — TG Supplier lookup */}
-          <Paper variant="outlined" elevation={0} sx={RECOVERY_CARD_SX}>
-            <Stack spacing={1.5}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
-                    Check item details
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ letterSpacing: "0.15px" }}>
-                    Look the scanned barcode up in TG Supplier.
-                  </Typography>
-                </Box>
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  disabled={busy}
-                  onClick={() => void handleCheckDetails()}
-                  startIcon={
-                    detailsLoading ? (
-                      <CircularProgress size={18} color="inherit" />
-                    ) : (
-                      <FactCheckOutlinedIcon />
-                    )
-                  }
-                  sx={{ flexShrink: 0, py: 1, px: 2.25 }}
-                >
-                  {detailsLoading ? "Checking…" : "Check item details"}
-                </Button>
+          <Typography variant="body1" sx={{ color: "text.secondary", letterSpacing: "0.15px", lineHeight: 1.5 }}>
+            No shipment was found for{" "}
+            <Box component="span" sx={{ color: "text.primary", fontWeight: 600 }}>
+              {barcode}
+            </Box>
+            .
+            <br />
+            If this item was scanned correctly, recover it with one of the actions below:
+          </Typography>
+
+          {/* Lookup result: order ID and item name only. */}
+          {detailsPhase === "loaded" && record ? (
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={{ xs: 1, sm: 2 }}
+              sx={{ p: 2, borderRadius: 1.5, bgcolor: "#fafafa" }}
+            >
+              <Typography sx={{ ...RECOVERY_FIELD_LABEL_SX, pt: 0, fontWeight: 700 }}>
+                Item Details
+              </Typography>
+              <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="body2" sx={{ letterSpacing: "0.15px", lineHeight: 1.5 }}>
+                  <Box component="span" sx={{ fontWeight: 700 }}>
+                    Order ID:
+                  </Box>{" "}
+                  {record.orderId}
+                </Typography>
+                <Typography variant="body2" sx={{ letterSpacing: "0.15px", lineHeight: 1.5 }}>
+                  <Box component="span" sx={{ fontWeight: 700 }}>
+                    Item:
+                  </Box>{" "}
+                  {record.itemName}
+                </Typography>
               </Stack>
-
-              {detailsPhase === "loaded" && record ? (
-                <Box
-                  sx={{
-                    display: "grid",
-                    gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" },
-                    gap: 2,
-                    p: 2,
-                    borderRadius: 1,
-                    bgcolor: RECOVERY_DETAIL_BOX_BG,
-                  }}
-                >
-                  <FieldBlock label="Item">{record.itemName}</FieldBlock>
-                  <FieldBlock label="Order ID">{record.orderId}</FieldBlock>
-                  <FieldBlock label="Supplier">{record.supplier}</FieldBlock>
-                </Box>
-              ) : null}
-
-              {detailsPhase === "noRecord" ? (
-                <Alert
-                  severity="error"
-                  variant="standard"
-                  icon={<CancelOutlinedIcon />}
-                  sx={RECOVERY_ALERT_ERROR_SX}
-                >
-                  <AlertTitle sx={RECOVERY_ALERT_TITLE_ERROR_SX}>No TG Supplier record</AlertTitle>
-                  <Typography
-                    variant="body2"
-                    sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#5F2120", fontWeight: 500 }}
-                  >
-                    This is not a TG Supplier item label, so shipment recovery is not applicable. Check
-                    that you scanned the item label and not the packaging or container barcode.
-                  </Typography>
-                </Alert>
-              ) : null}
             </Stack>
-          </Paper>
+          ) : null}
 
-          {/* Card 2 — mark as sent + generation retry */}
-          <Paper variant="outlined" elevation={0} sx={RECOVERY_CARD_SX}>
-            <Stack spacing={1.5}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
-                    Mark as sent
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ letterSpacing: "0.15px" }}>
-                    Updates TG Supplier and retries shipment generation.
-                  </Typography>
-                </Box>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  disabled={busy || detailsPhase === "noRecord"}
-                  onClick={() => void handleMarkAsSent()}
-                  startIcon={
-                    markSentLoading ? (
-                      <CircularProgress size={18} color="inherit" sx={{ color: "#fff !important" }} />
-                    ) : (
-                      <CheckIcon />
-                    )
-                  }
-                  sx={{ flexShrink: 0, py: 1, px: 2.25 }}
-                >
-                  {markSentLoading ? "Working…" : "Mark as sent"}
-                </Button>
-              </Stack>
+          {noRecordFound ? (
+            <Alert
+              severity="error"
+              variant="standard"
+              icon={<CancelOutlinedIcon />}
+              sx={{ ...RECOVERY_ALERT_ERROR_SX, alignItems: "flex-start" }}
+            >
+              <AlertTitle sx={RECOVERY_ALERT_TITLE_ERROR_SX}>No TG Supplier record</AlertTitle>
+              <Typography
+                variant="body2"
+                sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#5F2120", fontWeight: 500 }}
+              >
+                This is not a TG Supplier item label, so shipment recovery is not applicable. Check
+                that you scanned the item label and not the packaging or container barcode.
+              </Typography>
+            </Alert>
+          ) : null}
 
-              {markSentPhase === "facilityMismatch" ? (
-                <Alert
-                  severity="warning"
-                  variant="standard"
-                  icon={<ErrorOutlineIcon />}
-                  sx={RECOVERY_ALERT_WARNING_SX}
-                >
-                  <AlertTitle sx={RECOVERY_ALERT_TITLE_WARNING_SX}>Item is at another facility</AlertTitle>
-                  <Typography
-                    variant="body2"
-                    sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#663C00", fontWeight: 500 }}
-                  >
-                    This item belongs to another facility and must be transferred to be available for
-                    shipping.
-                    {mismatchFacilityName ? ` Currently held at ${mismatchFacilityName}.` : ""}
-                  </Typography>
-                </Alert>
-              ) : null}
+          {markSentPhase === "facilityMismatch" ? (
+            <Alert
+              severity="warning"
+              variant="standard"
+              icon={<ErrorOutlineIcon />}
+              sx={{ ...RECOVERY_ALERT_WARNING_SX, alignItems: "flex-start" }}
+            >
+              <AlertTitle sx={RECOVERY_ALERT_TITLE_WARNING_SX}>Item is at another facility</AlertTitle>
+              <Typography
+                variant="body2"
+                sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#663C00", fontWeight: 500 }}
+              >
+                This item belongs to another facility and must be transferred to be available for
+                shipping.
+                {mismatchFacilityName ? ` Currently held at ${mismatchFacilityName}.` : ""}
+              </Typography>
+            </Alert>
+          ) : null}
 
-              {markSentPhase === "noRecord" ? (
-                <Alert
-                  severity="error"
-                  variant="standard"
-                  icon={<CancelOutlinedIcon />}
-                  sx={RECOVERY_ALERT_ERROR_SX}
-                >
-                  <AlertTitle sx={RECOVERY_ALERT_TITLE_ERROR_SX}>No TG Supplier record</AlertTitle>
-                  <Typography
-                    variant="body2"
-                    sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#5F2120", fontWeight: 500 }}
-                  >
-                    This is not a TG Supplier item label, so recovery is not applicable.
-                  </Typography>
-                </Alert>
-              ) : null}
+          {markSentPhase === "failed" ? (
+            <Alert
+              severity="error"
+              variant="standard"
+              icon={<CancelOutlinedIcon />}
+              sx={{ ...RECOVERY_ALERT_ERROR_SX, alignItems: "flex-start" }}
+            >
+              <AlertTitle sx={RECOVERY_ALERT_TITLE_ERROR_SX}>Shipment generation failed</AlertTitle>
+              <Typography
+                variant="body2"
+                sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#5F2120", fontWeight: 500 }}
+              >
+                The item was marked as sent, but no shipment was generated. Create the shipment
+                manually to keep packing.
+              </Typography>
+            </Alert>
+          ) : null}
 
-              {markSentPhase === "failed" ? (
-                <Alert
-                  severity="error"
-                  variant="standard"
-                  icon={<CancelOutlinedIcon />}
-                  sx={RECOVERY_ALERT_ERROR_SX}
-                >
-                  <AlertTitle sx={RECOVERY_ALERT_TITLE_ERROR_SX}>
-                    Shipment generation failed
-                  </AlertTitle>
-                  <Stack spacing={1.5} alignItems="flex-start">
-                    <Typography
-                      variant="body2"
-                      sx={{ letterSpacing: "0.15px", lineHeight: 1.43, color: "#5F2120", fontWeight: 500 }}
-                    >
-                      The item was marked as sent, but no shipment was generated. Create the shipment
-                      manually to keep packing.
-                    </Typography>
-                    <Button
-                      variant="contained"
-                      color="warning"
-                      onClick={() => onCreateManually(record)}
-                      sx={{
-                        py: 0.75,
-                        px: 2.25,
-                        "&:not(.Mui-disabled)": {
-                          bgcolor: "#ed6c02",
-                          color: "#fff",
-                          "&:hover": { bgcolor: "#e65100" },
-                        },
-                      }}
-                    >
-                      Create shipment manually
-                    </Button>
-                  </Stack>
-                </Alert>
-              ) : null}
-            </Stack>
-          </Paper>
+          {/* Both actions live in one row under the message and any result/error above it. */}
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" },
+              gap: 2,
+            }}
+          >
+            <Button
+              fullWidth
+              variant="contained"
+              color="secondary"
+              // Spent once the lookup has resolved either way; the result shows above.
+              disabled={busy || detailsPhase === "loaded" || detailsPhase === "noRecord"}
+              onClick={() => void handleCheckDetails()}
+              startIcon={
+                detailsLoading ? <CircularProgress size={18} color="inherit" /> : <ManageSearchIcon />
+              }
+              sx={RECOVERY_ACTION_BUTTON_SX}
+            >
+              {detailsLoading ? "Checking…" : "Check Details"}
+            </Button>
+            {markSentPhase === "failed" ? (
+              // Generation failed: the second action becomes the manual escape hatch.
+              <Button
+                fullWidth
+                variant="contained"
+                color="warning"
+                onClick={() => onCreateManually(record)}
+                sx={{
+                  ...RECOVERY_ACTION_BUTTON_SX,
+                  // Only primary/secondary variants are pilled by the theme.
+                  borderRadius: "50px",
+                  "&:not(.Mui-disabled)": {
+                    bgcolor: "#ed6c02",
+                    color: "#fff",
+                    "&:hover": { bgcolor: "#e65100" },
+                  },
+                }}
+              >
+                Create Manual Shipment
+              </Button>
+            ) : (
+              <Button
+                fullWidth
+                variant="outlined"
+                color="secondary"
+                // Terminal outcomes are not retryable, so the action stays spent.
+                disabled={busy || noRecordFound || markSentPhase === "facilityMismatch"}
+                onClick={() => void handleMarkAsSent()}
+                startIcon={markSentLoading ? <CircularProgress size={18} color="inherit" /> : <CheckIcon />}
+                sx={RECOVERY_ACTION_BUTTON_SX}
+              >
+                {markSentLoading ? "Working…" : "Mark as sent"}
+              </Button>
+            )}
+          </Box>
         </Stack>
       </DialogContent>
-      <Divider sx={{ flexShrink: 0 }} />
-      <DialogActions sx={{ px: 3, py: 2, justifyContent: "flex-end", flexShrink: 0 }}>
-        <Button variant="contained" color="primary" onClick={onClose} sx={{ py: 1, px: 2.75 }}>
-          Close
-        </Button>
-      </DialogActions>
     </Dialog>
   );
 }
@@ -5317,7 +5125,7 @@ function ManualShipmentCreationDialog({
       PaperProps={{
         sx: {
           width: "100%",
-          maxWidth: 960,
+          maxWidth: 760,
           minHeight: 500,
           maxHeight: "calc(100% - 64px)",
           borderRadius: 1,
@@ -5352,25 +5160,29 @@ function ManualShipmentCreationDialog({
       >
         <Stack spacing={3}>
           {/* Order */}
-          <Stack spacing={2}>
+          <Stack spacing={1}>
             <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
               Order
             </Typography>
-            <RecoveryFormField
-              label="Order ID"
-              value={orderId}
-              onChange={setOrderId}
-              valid={orderIdValid}
-              errorText="Order ID is required."
-              placeholder="OR-000000"
-            />
+            <Box sx={RECOVERY_SECTION_PANEL_SX}>
+              <RecoveryFormField
+                label="Order ID"
+                value={orderId}
+                onChange={setOrderId}
+                valid={orderIdValid}
+                errorText="Order ID is required."
+                placeholder="OR-000000"
+              />
+            </Box>
           </Stack>
 
           {/* Customer */}
-          <Stack spacing={2}>
+          <Stack spacing={1}>
             <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
               Customer
             </Typography>
+            <Box sx={RECOVERY_SECTION_PANEL_SX}>
+            <Stack spacing={2}>
             <RecoveryFormField
               label="Full name"
               value={customerName}
@@ -5394,13 +5206,17 @@ function ManualShipmentCreationDialog({
               errorText="Phone is required."
               inputMode="tel"
             />
+            </Stack>
+            </Box>
           </Stack>
 
           {/* Address */}
-          <Stack spacing={2}>
+          <Stack spacing={1}>
             <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
               Address
             </Typography>
+            <Box sx={RECOVERY_SECTION_PANEL_SX}>
+            <Stack spacing={2}>
             <RecoverySelectField
               label="Country"
               value={countryCode}
@@ -5475,18 +5291,22 @@ function ManualShipmentCreationDialog({
               }
               disabled={!addressEnabled}
             />
+            </Stack>
+            </Box>
           </Stack>
 
           {/* Items */}
-          <Stack spacing={2}>
+          <Stack spacing={1}>
             <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
               Items
             </Typography>
+            <Box sx={RECOVERY_SECTION_PANEL_SX}>
+            <Stack spacing={2}>
             {items.map((item, idx) => (
               <Paper key={item.key} variant="outlined" elevation={0} sx={RECOVERY_CARD_SX}>
                 <Stack spacing={2}>
                   <Stack direction="row" alignItems="center" justifyContent="space-between">
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600, letterSpacing: "0.15px" }}>
+                    <Typography sx={{ fontSize: "0.875rem", fontWeight: 700, letterSpacing: "0.15px" }}>
                       Item {idx + 1}
                     </Typography>
                     {idx > 0 ? (
@@ -5496,7 +5316,7 @@ function ManualShipmentCreationDialog({
                           aria-label={`Remove item ${idx + 1}`}
                           onClick={() => handleRemoveItem(item.key)}
                         >
-                          <DeleteOutlineIcon />
+                          <CloseIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
                     ) : null}
@@ -5562,13 +5382,17 @@ function ManualShipmentCreationDialog({
             >
               Add another item
             </Button>
+            </Stack>
+            </Box>
           </Stack>
 
           {/* Shipping */}
-          <Stack spacing={2}>
+          <Stack spacing={1}>
             <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
               Shipping
             </Typography>
+            <Box sx={RECOVERY_SECTION_PANEL_SX}>
+            <Stack spacing={2}>
             <RecoverySelectField
               label="Carrier service"
               value={carrierServiceId}
@@ -5593,25 +5417,29 @@ function ManualShipmentCreationDialog({
               helperText="Currency is assigned automatically at creation."
               inputMode="decimal"
             />
+            </Stack>
+            </Box>
           </Stack>
 
           {/* Facility (read-only) */}
-          <Stack spacing={2}>
+          <Stack spacing={1}>
             <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
               Facility details
             </Typography>
-            {facility ? (
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-                <FallbackPackCopyField label="Facility ID" value={facility.id} />
-                <FallbackPackCopyField label="Facility" value={facility.name} />
-                <FallbackPackCopyField
-                  label="Address"
-                  value={`${facility.addressLine}, ${facility.city}, ${facility.country}`}
-                />
-              </Stack>
-            ) : (
-              <CircularProgress size={18} thickness={5} />
-            )}
+            <Box sx={RECOVERY_SECTION_PANEL_SX}>
+              {facility ? (
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                  <FallbackPackCopyField label="Facility ID" value={facility.id} />
+                  <FallbackPackCopyField label="Facility" value={facility.name} />
+                  <FallbackPackCopyField
+                    label="Address"
+                    value={`${facility.addressLine}, ${facility.city}, ${facility.country}`}
+                  />
+                </Stack>
+              ) : (
+                <CircularProgress size={18} thickness={5} />
+              )}
+            </Box>
           </Stack>
 
           {submitError ? (
@@ -5632,22 +5460,13 @@ function ManualShipmentCreationDialog({
           Cancel
         </Button>
         <Stack direction="row" alignItems="center" spacing={2}>
-          {!isFormValid ? (
-            <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: "0.15px" }}>
-              Complete all required fields to continue.
-            </Typography>
-          ) : null}
           <Button
             variant="contained"
-            color="primary"
+            color="secondary"
             disabled={!isFormValid || submitting}
             onClick={() => void handleSubmit()}
             startIcon={
-              submitting ? (
-                <CircularProgress size={18} color="inherit" sx={{ color: "#fff !important" }} />
-              ) : (
-                <LocalShippingOutlinedIcon />
-              )
+              submitting ? <CircularProgress size={18} color="inherit" sx={{ color: "#fff !important" }} /> : undefined
             }
             sx={{ py: 1, px: 2.75 }}
           >
@@ -5778,11 +5597,12 @@ export default function ReadyToPack() {
   } | null>(null);
   /** Shipment recovery: which outcome the current not-found query simulates; null outside recovery. */
   const [recoveryScenario, setRecoveryScenario] = useState<RecoveryScenario | null>(null);
-  const [recoveryConfirmOpen, setRecoveryConfirmOpen] = useState(false);
   const [recoveryHubOpen, setRecoveryHubOpen] = useState(false);
   const [manualShipmentDialogOpen, setManualShipmentDialogOpen] = useState(false);
   /** Order ID prefilled into manual creation, taken from the TG Supplier lookup when available. */
   const [manualShipmentPrefillOrderId, setManualShipmentPrefillOrderId] = useState("");
+  /** Success toast shown once a recovered shipment loads; null hides it. */
+  const [recoverySuccessToast, setRecoverySuccessToast] = useState<string | null>(null);
   /** Line items still in production; ticking "Item sent" releases them for shipment. */
   const [inProductionItemIds, setInProductionItemIds] = useState<string[]>([]);
   /** Item ids currently mid-release, so the checkbox can show progress and block double submits. */
@@ -6379,30 +6199,37 @@ export default function ReadyToPack() {
   const appendRecoveryHistory = (detail: string) =>
     appendShipmentHistory(detail, { carryAcrossLoad: true });
 
-  /** Explicit user action from the not-found state — never triggered by the lookup itself. */
+  /**
+   * Explicit user action from the not-found state — never triggered by the lookup
+   * itself. Opens the recovery actions directly; there is no confirmation step.
+   */
   const handleStartShipmentRecovery = () => {
     if (!HAS_SHIPMENT_RECOVERY_PERMISSION) return;
     // A plain not-found query has no scenario; default the demo to the happy path.
     if (recoveryScenario === null) setRecoveryScenario("happyPath");
-    setRecoveryConfirmOpen(true);
-  };
-
-  const handleRecoveryConfirmStart = () => {
-    setRecoveryConfirmOpen(false);
     setRecoveryHubOpen(true);
     appendRecoveryHistory(`Recovery: shipment recovery started for barcode ${recoveryBarcode}.`);
   };
 
   /** Generation succeeded — drop into the normal shipment details view. */
-  const handleRecoveryCompleted = (orderId: string, shipmentId: string) => {
+  const handleRecoveryCompleted = (
+    orderId: string,
+    shipmentId: string,
+    outcome: "generated" | "createdManually" = "generated",
+  ) => {
     setRecoveryHubOpen(false);
     setManualShipmentDialogOpen(false);
-    setRecoveryConfirmOpen(false);
     setRecoveryScenario(null);
     setNotFoundQuery(null);
     setOrderInput(orderId);
     appendRecoveryHistory(`Recovery: shipment ${shipmentId} loaded for packing.`);
     setLoadedOrderId(PROTOTYPE_PACK_ORDER_ID);
+    // Survives the load above — the reset effect deliberately leaves it alone.
+    setRecoverySuccessToast(
+      outcome === "createdManually"
+        ? `Shipment ${shipmentId} created — ready to pack.`
+        : `Shipment ${shipmentId} recovered — ready to pack.`,
+    );
   };
 
   const handleOpenManualShipmentCreation = (record: TgSupplierItemRecord | null) => {
@@ -6412,7 +6239,7 @@ export default function ReadyToPack() {
   };
 
   const handleManualShipmentCreated = (shipmentId: string, orderId: string) => {
-    handleRecoveryCompleted(orderId, shipmentId);
+    handleRecoveryCompleted(orderId, shipmentId, "createdManually");
   };
 
   /**
@@ -6501,14 +6328,12 @@ export default function ReadyToPack() {
       // not re-run for not-found queries and would read a stale batched `orderInput`.
       const scenario = resolveRecoveryScenario(id);
       setRecoveryScenario(scenario);
-      setRecoveryHubOpen(false);
       setManualShipmentDialogOpen(false);
       // Only the recovery demo keywords auto-open; a plain failed lookup never does.
-      setRecoveryConfirmOpen(scenario !== null && HAS_SHIPMENT_RECOVERY_PERMISSION);
+      setRecoveryHubOpen(scenario !== null && HAS_SHIPMENT_RECOVERY_PERMISSION);
       return;
     }
     setRecoveryScenario(null);
-    setRecoveryConfirmOpen(false);
     setRecoveryHubOpen(false);
     setManualShipmentDialogOpen(false);
     prototypeFallbackSupervisorLoadRef.current =
@@ -6535,7 +6360,6 @@ export default function ReadyToPack() {
     setNotFoundQuery(null);
     setOrderBrowseStack([]);
     setRecoveryScenario(null);
-    setRecoveryConfirmOpen(false);
     setRecoveryHubOpen(false);
     setManualShipmentDialogOpen(false);
     // Clearing `loadedOrderId` runs the reset effect, which restores the rest.
@@ -9046,8 +8870,7 @@ export default function ReadyToPack() {
             HAS_SHIPMENT_RECOVERY_PERMISSION ? (
               <Button
                 variant="contained"
-                color="primary"
-                startIcon={<RestartAltIcon />}
+                color="secondary"
                 onClick={handleStartShipmentRecovery}
                 sx={{ py: 1, px: 3 }}
               >
@@ -9059,12 +8882,6 @@ export default function ReadyToPack() {
       ) : (
         <EmptyStateHero />
       )}
-      <ShipmentRecoveryConfirmDialog
-        open={recoveryConfirmOpen}
-        barcode={recoveryBarcode}
-        onCancel={() => setRecoveryConfirmOpen(false)}
-        onStart={handleRecoveryConfirmStart}
-      />
       {recoveryScenario && (
         <ShipmentRecoveryHubDialog
           open={recoveryHubOpen}
@@ -9086,6 +8903,28 @@ export default function ReadyToPack() {
         onLog={appendRecoveryHistory}
         onCreated={handleManualShipmentCreated}
       />
+      <Snackbar
+        open={Boolean(recoverySuccessToast)}
+        autoHideDuration={6000}
+        onClose={() => setRecoverySuccessToast(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          severity="success"
+          variant="filled"
+          onClose={() => setRecoverySuccessToast(null)}
+          sx={{
+            alignItems: "center",
+            borderRadius: 1,
+            fontSize: 15,
+            letterSpacing: "0.15px",
+            boxShadow:
+              "0px 3px 5px -1px rgba(0,0,0,0.2), 0px 6px 10px 0px rgba(0,0,0,0.14), 0px 1px 18px 0px rgba(0,0,0,0.12)",
+          }}
+        >
+          {recoverySuccessToast}
+        </Alert>
+      </Snackbar>
       <FallbackPackDialog
         open={fallbackPackDialogOpen}
         onClose={() => setFallbackPackDialogOpen(false)}
