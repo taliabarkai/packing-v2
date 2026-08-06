@@ -3,7 +3,8 @@
  *
  * Set VITE_TG_SUPPLIER_LOOKUP_URL to a POST endpoint that accepts JSON
  * { barcode: string } and returns JSON
- * { record?: { barcode, itemName, orderId, supplier, supplierFacilityId, supplierFacilityName } | null }.
+ * { record?: { barcode, itemName, descriptionLines?, orderId, supplier, supplierFacilityId,
+ *   supplierFacilityName } | null }.
  *
  * Set VITE_TG_SUPPLIER_MARK_SENT_URL to a POST endpoint that accepts JSON
  * { barcode: string, actor: string } and returns JSON { ok: boolean }.
@@ -27,6 +28,9 @@ function parseRecord(value: unknown): TgSupplierItemRecord | null {
   return {
     barcode: r.barcode,
     itemName: r.itemName,
+    descriptionLines: Array.isArray(r.descriptionLines)
+      ? r.descriptionLines.filter((line): line is string => typeof line === "string")
+      : [],
     orderId: r.orderId,
     supplier: r.supplier,
     supplierFacilityId: r.supplierFacilityId,

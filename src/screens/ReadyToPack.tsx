@@ -4427,8 +4427,18 @@ const RECOVERY_SECTION_TITLE_SX = {
   letterSpacing: "0.15px",
 } as const;
 
-/** The two recovery actions sit side by side at the bottom of the hub dialog. */
-const RECOVERY_ACTION_BUTTON_SX = { py: 1.25, px: 2.5, fontSize: "0.9375rem" } as const;
+/** One action at a time, right-aligned, sized like the "Start shipment recovery" button. */
+const RECOVERY_ACTION_BUTTON_SX = { py: 1, px: 3 } as const;
+
+const RECOVERY_DETAIL_LABEL_SX = {
+  width: 156,
+  flexShrink: 0,
+  fontSize: "0.875rem",
+  fontWeight: 700,
+  color: "text.primary",
+} as const;
+
+const RECOVERY_DETAIL_VALUE_SX = { letterSpacing: "0.15px", lineHeight: 1.5 } as const;
 
 /**
  * Grey panel that holds a section's fields. The section title sits above it, so the
@@ -4739,29 +4749,29 @@ function ShipmentRecoveryHubDialog({
             If this item was scanned correctly, recover it with one of the actions below:
           </Typography>
 
-          {/* Lookup result: order ID and item name only. */}
+          {/* Lookup result: order ID and the item's spec, titled above its panel. */}
           {detailsPhase === "loaded" && record ? (
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={{ xs: 1, sm: 2 }}
-              sx={{ p: 2, borderRadius: 1.5, bgcolor: "#fafafa" }}
-            >
-              <Typography sx={{ ...RECOVERY_FIELD_LABEL_SX, pt: 0, fontWeight: 700 }}>
+            <Stack spacing={1}>
+              <Typography variant="subtitle1" sx={RECOVERY_SECTION_TITLE_SX}>
                 Item Details
               </Typography>
-              <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
-                <Typography variant="body2" sx={{ letterSpacing: "0.15px", lineHeight: 1.5 }}>
-                  <Box component="span" sx={{ fontWeight: 700 }}>
-                    Order ID:
-                  </Box>{" "}
-                  {record.orderId}
-                </Typography>
-                <Typography variant="body2" sx={{ letterSpacing: "0.15px", lineHeight: 1.5 }}>
-                  <Box component="span" sx={{ fontWeight: 700 }}>
-                    Item:
-                  </Box>{" "}
-                  {record.itemName}
-                </Typography>
+              <Stack spacing={1.5} sx={{ p: 2, borderRadius: 1.5, bgcolor: "#fafafa" }}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 0.25, sm: 2 }}>
+                  <Typography sx={RECOVERY_DETAIL_LABEL_SX}>Order ID:</Typography>
+                  <Typography variant="body2" sx={RECOVERY_DETAIL_VALUE_SX}>
+                    {record.orderId}
+                  </Typography>
+                </Stack>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 0.25, sm: 2 }}>
+                  <Typography sx={RECOVERY_DETAIL_LABEL_SX}>Item Description:</Typography>
+                  <Stack spacing={0.25} sx={{ flex: 1, minWidth: 0 }}>
+                    {record.descriptionLines.map((line) => (
+                      <Typography key={line} variant="body2" sx={RECOVERY_DETAIL_VALUE_SX}>
+                        {line}
+                      </Typography>
+                    ))}
+                  </Stack>
+                </Stack>
               </Stack>
             </Stack>
           ) : null}
@@ -4821,32 +4831,15 @@ function ShipmentRecoveryHubDialog({
             </Alert>
           ) : null}
 
-          {/* Both actions live in one row under the message and any result/error above it. */}
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" },
-              gap: 2,
-            }}
-          >
-            <Button
-              fullWidth
-              variant="contained"
-              color="secondary"
-              // Spent once the lookup has resolved either way; the result shows above.
-              disabled={busy || detailsPhase === "loaded" || detailsPhase === "noRecord"}
-              onClick={() => void handleCheckDetails()}
-              startIcon={
-                detailsLoading ? <CircularProgress size={18} color="inherit" /> : <ManageSearchIcon />
-              }
-              sx={RECOVERY_ACTION_BUTTON_SX}
-            >
-              {detailsLoading ? "Checking…" : "Check Details"}
-            </Button>
+          {/*
+            One action at a time, hugging its label on the right: the lookup first,
+            then mark-as-sent once the details are on screen, then whatever the
+            outcome leaves to do.
+          */}
+          <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
             {markSentPhase === "failed" ? (
-              // Generation failed: the second action becomes the manual escape hatch.
+              // Generation failed: the manual escape hatch is all that is left.
               <Button
-                fullWidth
                 variant="contained"
                 color="warning"
                 onClick={() => onCreateManually(record)}
@@ -4863,18 +4856,34 @@ function ShipmentRecoveryHubDialog({
               >
                 Create Manual Shipment
               </Button>
-            ) : (
+            ) : markSentPhase === "facilityMismatch" || noRecordFound ? (
+              // Terminal outcomes: nothing here can recover the item.
+              <Button variant="outlined" color="secondary" onClick={onClose} sx={RECOVERY_ACTION_BUTTON_SX}>
+                Close
+              </Button>
+            ) : detailsPhase === "loaded" ? (
               <Button
-                fullWidth
-                variant="outlined"
+                variant="contained"
                 color="secondary"
-                // Terminal outcomes are not retryable, so the action stays spent.
-                disabled={busy || noRecordFound || markSentPhase === "facilityMismatch"}
+                disabled={busy}
                 onClick={() => void handleMarkAsSent()}
                 startIcon={markSentLoading ? <CircularProgress size={18} color="inherit" /> : <CheckIcon />}
                 sx={RECOVERY_ACTION_BUTTON_SX}
               >
-                {markSentLoading ? "Working…" : "Mark as sent"}
+                {markSentLoading ? "Working…" : "Mark As Sent"}
+              </Button>
+            ) : (
+              <Button
+                variant="outlined"
+                color="secondary"
+                disabled={busy}
+                onClick={() => void handleCheckDetails()}
+                startIcon={
+                  detailsLoading ? <CircularProgress size={18} color="inherit" /> : <ManageSearchIcon />
+                }
+                sx={RECOVERY_ACTION_BUTTON_SX}
+              >
+                {detailsLoading ? "Checking…" : "Check Details"}
               </Button>
             )}
           </Box>

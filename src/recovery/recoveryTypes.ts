@@ -21,6 +21,8 @@ export type RecoveryScenario =
 export type TgSupplierItemRecord = {
   barcode: string;
   itemName: string;
+  /** Item spec as TG Supplier records it, one attribute per line. */
+  descriptionLines: readonly string[];
   orderId: string;
   supplier: string;
   /** Facility the item physically belongs to; compared against the current packing facility. */
