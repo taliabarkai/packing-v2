@@ -4745,8 +4745,6 @@ function ShipmentRecoveryHubDialog({
               {barcode}
             </Box>
             .
-            <br />
-            If this item was scanned correctly, recover it with one of the actions below:
           </Typography>
 
           {/* Lookup result: order ID and the item's spec, titled above its panel. */}
